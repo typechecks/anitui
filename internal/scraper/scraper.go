@@ -43,3 +43,12 @@ func (u *UnifiedScraper) Search(query string, dub bool) []models.Anime {
 	wg.Wait()
 	return allResults
 }
+
+func (u *UnifiedScraper) GetScraper(name string) Scraper {
+	for _, s := range u.scrapers {
+		if s.Name() == name {
+			return s
+		}
+	}
+	return nil
+}

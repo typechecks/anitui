@@ -4,8 +4,12 @@ BINARY_NAME=anitui
 CMD_DIR=./cmd/anitui
 BUILD_DIR=./build
 
+# Use PowerShell for cross-platform compatibility if needed, 
+# but simple go commands work fine.
+# For 'clean', we use a conditional to handle Windows/Unix.
+
 build:
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
+	go build -o $(BUILD_DIR)/$(BINARY_NAME).exe $(CMD_DIR)
 
 run:
 	go run $(CMD_DIR)
@@ -20,15 +24,15 @@ lint:
 	golangci-lint run ./...
 
 clean:
-	rm -rf $(BUILD_DIR)
+	@if exist $(BUILD_DIR) (rd /s /q $(BUILD_DIR))
 
 install:
 	go install $(CMD_DIR)
 
 build-linux:
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)
+	set GOOS=linux&& set GOARCH=amd64&& go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)
 
 build-windows:
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+	set GOOS=windows&& set GOARCH=amd64&& go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
 
 build-all: build-linux build-windows

@@ -7,9 +7,3 @@ type Anime struct {
 	CoverURL    string
 	Source      string
 }
-
-type SearchResult struct {
-	Anime  []Anime
-	Source string
-	Error  error
-}

@@ -556,18 +556,30 @@ func (s *AllanimeScraper) graphql(vars map[string]interface{}, query string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("marshal graphql: %w", err)
 	}
-	return s.post(allanimeAPI+"/api", jsonBody)
+	return s.doRequest("POST", allanimeAPI+"/api", jsonBody)
 }
 
-func (s *AllanimeScraper) post(urlStr string, body []byte) ([]byte, error) {
-	req, err := http.NewRequest("POST", urlStr, bytes.NewReader(body))
+func (s *AllanimeScraper) get(urlStr string) ([]byte, error) {
+	return s.doRequest("GET", urlStr, nil)
+}
+
+func (s *AllanimeScraper) doRequest(method, urlStr string, body []byte) ([]byte, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequest(method, urlStr, bodyReader)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 	req.Header.Set("Referer", allanimeRefr)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json, */*")
+	if method == "POST" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -575,11 +587,11 @@ func (s *AllanimeScraper) post(urlStr string, body []byte) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	return io.ReadAll(resp.Body)
-}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
+	}
 
-func (s *AllanimeScraper) get(urlStr string) ([]byte, error) {
-	return doGet(s.client, urlStr)
+	return io.ReadAll(resp.Body)
 }
 
 func doGet(client *http.Client, urlStr string) ([]byte, error) {

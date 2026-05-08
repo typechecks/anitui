@@ -33,7 +33,11 @@ var debugLog *log.Logger
 
 func init() {
 	if os.Getenv("ANITUI_DEBUG") != "" {
-		f, err := os.OpenFile("/tmp/anitui-tui-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logPath := "anitui-tui-debug.log"
+		if tempDir := os.TempDir(); tempDir != "" {
+			logPath = os.ExpandEnv(fmt.Sprintf("%s/anitui-tui-debug.log", tempDir))
+		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			debugLog = log.New(io.Discard, "", 0)
 			return
@@ -360,7 +364,11 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		m.loadingSince = time.Now()
 		m.pendingMsg = nil
 
-		m.currentSource = scraper.NewAllanimeScraper()
+		m.currentSource = m.scrapers.GetScraper(anime.Source)
+		if m.currentSource == nil {
+			// Fallback or handle error
+			m.currentSource = m.scrapers.GetScraper("allanime.day")
+		}
 		return m, tea.Batch(m.loadEpisodes(anime.URL), tickCmd())
 
 	case ScreenEpisodes:
