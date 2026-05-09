@@ -14,9 +14,9 @@
       {
         packages.default = pkgs.buildGoModule {
           pname = "anitui";
-          version = "0.1.0"; # Update this or use a helper to get it from git
+          version = "0.1.1";
           src = ./.;
-          vendorHash = null; # Set this after first build or use proxy
+          vendorHash = null;
           subPackages = [ "cmd/anitui" ];
         };
 
