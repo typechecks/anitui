@@ -61,10 +61,10 @@ controls
 | k / ↑ | up |
 | g g | jump to top |
 | G | jump to bottom |
-| ctrl+u | page up |
-| ctrl+d | page down |
+| ctrl+u / ⌘u | page up |
+| ctrl+d / ⌘d | page down |
 | / | search |
-| ctrl+c | exit |
+| ctrl+c / ⌘c | exit |
 
 player support
 --------------
@@ -72,8 +72,9 @@ player support
 anitui auto-detects and uses:
 
 1. mpv
-2. vlc
-3. haruna
+2. iina (macOS)
+3. vlc
+4. haruna
 
 override via `ANITUI_PLAYER` environment variable.
 

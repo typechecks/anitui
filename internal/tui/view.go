@@ -2,12 +2,20 @@ package tui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
 var spinnerChars = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func modKey() string {
+	if runtime.GOOS == "darwin" {
+		return "⌘"
+	}
+	return "Ctrl"
+}
 
 func (m Model) View() string {
 	switch m.screen {
@@ -52,7 +60,7 @@ func (m Model) viewHome() string {
 	center.WriteString(searchBox)
 	center.WriteString("\n\n")
 
-	help := HelpStyle.Render("Enter to search  |  Tab to switch " + mode + "  |  Ctrl+C to quit")
+	help := HelpStyle.Render("Enter to search  |  Tab to switch " + mode + "  |  " + modKey() + "+C to quit")
 	center.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help))
 
 	version := lipgloss.NewStyle().
@@ -239,7 +247,7 @@ func (m Model) viewError(errMsg string) string {
 	sb.WriteString(errorBox)
 	sb.WriteString("\n\n")
 
-	help := HelpStyle.Render("Esc to go back  |  / to search again  |  Ctrl+C to quit")
+	help := HelpStyle.Render("Esc to go back  |  / to search again  |  " + modKey() + "+C to quit")
 	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help))
 
 	return lipgloss.PlaceVertical(m.height, lipgloss.Center, sb.String())
