@@ -66,8 +66,8 @@ jobs:
           VERSION="${{ needs.goreleaser.outputs.version }}"
           RELEASE_URL="https://github.com/typechecks/anitui/releases/download/v${VERSION}"
 
-          curl -fsSL "${RELEASE_URL}/anitui_Linux_x86_64.tar.gz" -o /tmp/anitui-x86_64.tar.gz
-          curl -fsSL "${RELEASE_URL}/anitui_Linux_arm64.tar.gz" -o /tmp/anitui-arm64.tar.gz
+          curl -fsSL "${RELEASE_URL}/anitui_linux_amd64.tar.gz" -o /tmp/anitui-x86_64.tar.gz
+          curl -fsSL "${RELEASE_URL}/anitui_linux_arm64.tar.gz" -o /tmp/anitui-arm64.tar.gz
 
           SHA256_X86_64=$(sha256sum /tmp/anitui-x86_64.tar.gz | cut -d' ' -f1)
           SHA256_ARM64=$(sha256sum /tmp/anitui-arm64.tar.gz | cut -d' ' -f1)
