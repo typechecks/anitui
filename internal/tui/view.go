@@ -27,12 +27,12 @@ func (m Model) View() string {
 }
 
 func (m Model) viewHome() string {
-	var sb strings.Builder
+	var center strings.Builder
 
 	logo := RenderAniTuiLogo(m.width)
 
-	sb.WriteString(logo)
-	sb.WriteString("\n\n")
+	center.WriteString(logo)
+	center.WriteString("\n\n")
 
 	mode := "SUB"
 	if m.dub {
@@ -44,34 +44,29 @@ func (m Model) viewHome() string {
 		Render(fmt.Sprintf(" [%s] ", mode))
 
 	modeLine := lipgloss.JoinHorizontal(lipgloss.Center, modeLabel)
-	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, modeLine))
-	sb.WriteString("\n\n")
+	center.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, modeLine))
+	center.WriteString("\n\n")
 
 	searchBox := SearchInputStyle.Width(min(60, m.width-10)).Render(m.input.View())
 	searchBox = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, searchBox)
-	sb.WriteString(searchBox)
-	sb.WriteString("\n\n")
+	center.WriteString(searchBox)
+	center.WriteString("\n\n")
 
 	help := HelpStyle.Render("Enter to search  |  Tab to switch " + mode + "  |  Ctrl+C to quit")
-	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help))
+	center.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help))
 
 	version := lipgloss.NewStyle().
 		Faint(true).
 		Foreground(DimColor).
 		Render("v" + Version)
 
-	// Calculate vertical space to push version to the bottom
-	logoHeight := lipgloss.Height(logo)
-	contentHeight := logoHeight + 2 + 1 + 2 + 3 + 1 + 1 // logo + gaps + mode + gap + search + gap + help
-	padding := m.height - contentHeight - 1
-	if padding > 0 {
-		sb.WriteString(strings.Repeat("\n", padding))
+	if m.height == 0 {
+		return center.String() + "\n\n" + lipgloss.PlaceHorizontal(m.width, lipgloss.Right, version)
 	}
 
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Right, version))
-
-	return lipgloss.PlaceVertical(m.height, lipgloss.Center, sb.String())
+	centered := lipgloss.Place(m.width, m.height-1, lipgloss.Center, lipgloss.Center, center.String())
+	versionLine := lipgloss.PlaceHorizontal(m.width, lipgloss.Right, version)
+	return centered + "\n" + versionLine
 }
 
 func (m Model) viewSearching() string {
