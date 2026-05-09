@@ -38,6 +38,7 @@ echo "Downloading anitui $LATEST_TAG for $OS/$ARCH..."
 curl -L "$URL" -o /tmp/anitui.tar.gz
 
 echo "Installing to $INSTALL_DIR..."
+rm -f "$INSTALL_DIR/anitui.old"
 tar -xzf /tmp/anitui.tar.gz -C /tmp
 mv /tmp/anitui "$INSTALL_DIR/anitui"
 chmod +x "$INSTALL_DIR/anitui"

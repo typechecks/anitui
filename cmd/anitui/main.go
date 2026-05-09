@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/anitui/anitui/internal/scraper"
 	"github.com/anitui/anitui/internal/tui"
+	"github.com/anitui/anitui/internal/update"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -18,6 +20,39 @@ func main() {
 			os.Exit(1)
 		}
 		defer f.Close()
+	}
+
+	update.Cleanup()
+
+	fmt.Print("Checking for updates...")
+	newVersion, err := update.Check(tui.Version)
+
+	if err != nil {
+		fmt.Printf("\r\033[K! Cannot check for updates (%v)\n", err)
+		fmt.Println("  Continuing with current version...")
+		time.Sleep(2 * time.Second)
+	} else if newVersion == "" {
+		fmt.Printf("\r\033[K~ v%s is up to date\n", tui.Version)
+		time.Sleep(800 * time.Millisecond)
+	} else {
+		fmt.Printf("\r\033[Kv%s available (current v%s)\n", newVersion, tui.Version)
+		if !update.IsWritable() {
+			fmt.Println("  Auto-update requires sudo. To update manually:")
+			fmt.Println("  curl -fsSL https://raw.githubusercontent.com/typechecks/anitui/main/scripts/install.sh | sudo sh")
+			fmt.Println("  Continuing with current version...")
+			time.Sleep(3 * time.Second)
+		} else {
+			if err := update.Apply(newVersion); err != nil {
+				fmt.Printf("\r\033[K! Update failed: %v\n", err)
+				fmt.Println("  Continuing with current version...")
+				time.Sleep(2 * time.Second)
+			} else {
+				fmt.Printf("\r\033[KUpdated to v%s. Relaunching...\n", newVersion)
+				time.Sleep(300 * time.Millisecond)
+				update.Relaunch()
+				return
+			}
+		}
 	}
 
 	allanime := scraper.NewAllanimeScraper()

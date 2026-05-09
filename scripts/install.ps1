@@ -36,6 +36,7 @@ Write-Host "Extracting to $installDir..." -ForegroundColor Cyan
 Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
 
 $exePath = Join-Path $installDir "anitui.exe"
+Remove-Item "$exePath.old" -ErrorAction SilentlyContinue
 
 # Add to User PATH if not already there
 $path = [Environment]::GetEnvironmentVariable("Path", "User")
