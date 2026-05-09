@@ -13,11 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: set up go
         uses: actions/setup-go@v5
@@ -40,5 +45,88 @@ jobs:
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: typechecks.anitui
-          installers-regex: '\.zip$' # Matches the windows zip from goreleaser
+          installers-regex: '\.zip$'
           token: ${{ secrets.WINGET_TOKEN }}
+
+  aur-publish:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: prepare anitui PKGBUILD
+        run: |
+          sed "s/__VERSION__/${{ needs.goreleaser.outputs.version }}/g" aur/anitui/PKGBUILD > /tmp/PKGBUILD-anitui
+
+      - name: prepare anitui-bin PKGBUILD
+        run: |
+          VERSION="${{ needs.goreleaser.outputs.version }}"
+          RELEASE_URL="https://github.com/typechecks/anitui/releases/download/v${VERSION}"
+
+          curl -fsSL "${RELEASE_URL}/anitui_Linux_x86_64.tar.gz" -o /tmp/anitui-x86_64.tar.gz
+          curl -fsSL "${RELEASE_URL}/anitui_Linux_arm64.tar.gz" -o /tmp/anitui-arm64.tar.gz
+
+          SHA256_X86_64=$(sha256sum /tmp/anitui-x86_64.tar.gz | cut -d' ' -f1)
+          SHA256_ARM64=$(sha256sum /tmp/anitui-arm64.tar.gz | cut -d' ' -f1)
+
+          sed -e "s/__VERSION__/${VERSION}/g" \
+              -e "s/__SHA256_X86_64__/${SHA256_X86_64}/g" \
+              -e "s/__SHA256_ARM64__/${SHA256_ARM64}/g" \
+              aur/anitui-bin/PKGBUILD > /tmp/PKGBUILD-anitui-bin
+
+      - name: publish anitui to AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        continue-on-error: true
+        uses: KSXGitHub/github-actions-deploy-aur@v2
+        with:
+          pkgname: anitui
+          pkgbuild: /tmp/PKGBUILD-anitui
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "update to ${{ needs.goreleaser.outputs.version }}"
+          updpkgsums: true
+
+      - name: publish anitui-bin to AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        continue-on-error: true
+        uses: KSXGitHub/github-actions-deploy-aur@v2
+        with:
+          pkgname: anitui-bin
+          pkgbuild: /tmp/PKGBUILD-anitui-bin
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "update to ${{ needs.goreleaser.outputs.version }}"
+          updpkgsums: false
+
+  update-flake:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: update flake.nix version
+        run: |
+          VERSION="${{ needs.goreleaser.outputs.version }}"
+          sed -i "s/version = \".*\"/version = \"${VERSION}\"/" flake.nix
+
+      - name: commit and push
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add flake.nix
+          if git diff --staged --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "flake: bump version to ${VERSION}"
+            git push origin main
+          fi
+        env:
+          VERSION: ${{ needs.goreleaser.outputs.version }}
