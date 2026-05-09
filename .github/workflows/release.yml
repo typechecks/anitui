@@ -11,6 +11,8 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: publish to winget
-        if: ${{ secrets.WINGET_TOKEN != '' }}
+        if: env.WINGET_TOKEN != ''
         continue-on-error: true
         uses: vedantmgoyal9/winget-releaser@v2
         with:
