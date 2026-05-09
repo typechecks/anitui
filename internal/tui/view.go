@@ -113,21 +113,33 @@ func (m Model) viewResults() string {
 	sb.WriteString(header)
 	sb.WriteString("\n\n")
 
-	availableHeight := max(1, m.height-8)
-	startIdx := 0
-	if m.cursor >= availableHeight {
-		startIdx = max(0, m.cursor-availableHeight+1)
-	}
-	endIdx := min(len(m.results), startIdx+availableHeight)
+	maxLines := max(1, m.height-8)
 
-	for i := startIdx; i < endIdx; i++ {
+	linesBefore := 0
+	startIdx := m.cursor
+	for startIdx > 0 {
+		itemLines := 1
+		if startIdx-1 == m.cursor && m.results[startIdx-1].Description != "" {
+			itemLines = 3
+		}
+		if linesBefore+itemLines >= maxLines {
+			break
+		}
+		linesBefore += itemLines
+		startIdx--
+	}
+
+	linesUsed := 0
+	for i := startIdx; i < len(m.results); i++ {
 		anime := m.results[i]
+		itemLines := 1
 
 		if i == m.cursor {
 			title := SelectedListItemStyle.Width(m.width - 4).Render(anime.Title)
 			sb.WriteString(title)
 			sb.WriteString("\n")
 			if anime.Description != "" {
+				itemLines = 3
 				desc := lipgloss.NewStyle().
 					Foreground(DimColor).
 					Background(lipgloss.AdaptiveColor{Light: "7", Dark: "236"}).
@@ -141,11 +153,11 @@ func (m Model) viewResults() string {
 			title := ListItemStyle.Width(m.width - 4).Render(TitleStyle.Render(anime.Title))
 			sb.WriteString(title)
 			sb.WriteString("\n")
-			if anime.Description != "" {
-				desc := ListItemStyle.Width(m.width - 4).Render(DimStyle.Render(truncate(anime.Description, m.width-8)))
-				sb.WriteString(desc)
-				sb.WriteString("\n\n")
-			}
+		}
+
+		linesUsed += itemLines
+		if linesUsed >= maxLines {
+			break
 		}
 	}
 
