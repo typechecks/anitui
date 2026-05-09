@@ -25,7 +25,7 @@ func main() {
 
 	update.Cleanup()
 
-	if isReleaseBuild() && checkForUpdates() {
+	if isReleaseBuild() && !update.IsPackageManagerInstall() && checkForUpdates() {
 		return
 	}
 

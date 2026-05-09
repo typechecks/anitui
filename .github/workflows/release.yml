@@ -57,11 +57,12 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: prepare anitui PKGBUILD
+      - name: prepare anitui PKGBUILD and SRCINFO
         run: |
           sed "s/__VERSION__/${{ needs.goreleaser.outputs.version }}/g" aur/anitui/PKGBUILD > /tmp/PKGBUILD-anitui
+          sed "s/__VERSION__/${{ needs.goreleaser.outputs.version }}/g" aur/anitui/.SRCINFO > /tmp/SRCINFO-anitui
 
-      - name: prepare anitui-bin PKGBUILD
+      - name: prepare anitui-bin PKGBUILD and SRCINFO
         run: |
           VERSION="${{ needs.goreleaser.outputs.version }}"
           RELEASE_URL="https://github.com/typechecks/anitui/releases/download/v${VERSION}"
@@ -76,32 +77,53 @@ jobs:
               -e "s/__SHA256_X86_64__/${SHA256_X86_64}/g" \
               -e "s/__SHA256_ARM64__/${SHA256_ARM64}/g" \
               aur/anitui-bin/PKGBUILD > /tmp/PKGBUILD-anitui-bin
+          sed -e "s/__VERSION__/${VERSION}/g" \
+              -e "s/__SHA256_X86_64__/${SHA256_X86_64}/g" \
+              -e "s/__SHA256_ARM64__/${SHA256_ARM64}/g" \
+              aur/anitui-bin/.SRCINFO > /tmp/SRCINFO-anitui-bin
 
-      - name: publish anitui to AUR
+      - name: setup SSH for AUR
         if: env.AUR_SSH_PRIVATE_KEY != ''
-        continue-on-error: true
-        uses: KSXGitHub/github-actions-deploy-aur@v2
-        with:
-          pkgname: anitui
-          pkgbuild: /tmp/PKGBUILD-anitui
-          commit_username: "github-actions[bot]"
-          commit_email: "github-actions[bot]@users.noreply.github.com"
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "update to ${{ needs.goreleaser.outputs.version }}"
-          updpkgsums: true
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keygen -lf ~/.ssh/aur_key
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config << 'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur_key
+            User aur
+            StrictHostKeyChecking yes
+            PubkeyAcceptedKeyTypes +ssh-ed25519
+          EOF
 
-      - name: publish anitui-bin to AUR
+      - name: publish PKGBUILDs to AUR
         if: env.AUR_SSH_PRIVATE_KEY != ''
-        continue-on-error: true
-        uses: KSXGitHub/github-actions-deploy-aur@v2
-        with:
-          pkgname: anitui-bin
-          pkgbuild: /tmp/PKGBUILD-anitui-bin
-          commit_username: "github-actions[bot]"
-          commit_email: "github-actions[bot]@users.noreply.github.com"
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "update to ${{ needs.goreleaser.outputs.version }}"
-          updpkgsums: false
+        env:
+          VERSION: ${{ needs.goreleaser.outputs.version }}
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=yes"
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          publish_aur() {
+            local pkgname="$1"
+            local pkgbuild_path="$2"
+            local srcinfo_path="$3"
+
+            git clone "aur@aur.archlinux.org:${pkgname}.git" "/tmp/aur-${pkgname}"
+            cp "$pkgbuild_path" "/tmp/aur-${pkgname}/PKGBUILD"
+            cp "$srcinfo_path" "/tmp/aur-${pkgname}/.SRCINFO"
+            cd "/tmp/aur-${pkgname}"
+
+            git add PKGBUILD .SRCINFO
+            git diff --staged --quiet || git commit -m "update to ${VERSION}"
+            git push
+          }
+
+          publish_aur "anitui" "/tmp/PKGBUILD-anitui" "/tmp/SRCINFO-anitui"
+          publish_aur "anitui-bin" "/tmp/PKGBUILD-anitui-bin" "/tmp/SRCINFO-anitui-bin"
 
   update-flake:
     needs: goreleaser

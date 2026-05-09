@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 var playerPriority = []string{"mpv", "iina", "vlc", "haruna"}
@@ -16,8 +17,8 @@ func DetectPlayer() string {
 	}
 
 	for _, player := range playerPriority {
-		if playerAvailable(player) {
-			return player
+		if path := findPlayer(player); path != "" {
+			return path
 		}
 	}
 	return ""
@@ -31,8 +32,9 @@ func Play(url string) error {
 
 	var args []string
 
-	switch player {
-	case "mpv":
+	base := strings.ToLower(fileName(player))
+	switch {
+	case strings.Contains(base, "mpv"):
 		args = []string{
 			"--really-quiet",
 			"--no-terminal",
@@ -40,11 +42,13 @@ func Play(url string) error {
 			"--http-header-fields=Referer: https://allmanga.to",
 			url,
 		}
-	case "iina":
+	case strings.Contains(base, "iina"):
 		args = []string{"--no-stdin", "--keep-running", url}
-	case "vlc":
+	case strings.Contains(base, "vlc"):
 		args = []string{"--quiet", "--play-and-exit", "--http-referrer=https://allmanga.to", url}
-	case "haruna":
+	case strings.Contains(base, "haruna"):
+		args = []string{url}
+	default:
 		args = []string{url}
 	}
 
@@ -66,53 +70,98 @@ func Play(url string) error {
 	return nil
 }
 
-func playerAvailable(name string) bool {
-	// First check if it's in the PATH
-	if _, err := exec.LookPath(name); err == nil {
-		return true
+func findPlayer(name string) string {
+	if path, err := exec.LookPath(name); err == nil {
+		return path
 	}
 
-	var commonPaths []string
-
-	switch {
-	case runtime.GOOS == "windows":
-		switch name {
-		case "vlc":
-			commonPaths = []string{
-				`C:\Program Files\VideoLAN\VLC\vlc.exe`,
-				`C:\Program Files (x86)\VideoLAN\VLC\vlc.exe`,
-			}
-		case "mpv":
-			commonPaths = []string{
-				`C:\Program Files\mpv\mpv.exe`,
-				`C:\mpv\mpv.exe`,
-			}
-		}
-
-	case runtime.GOOS == "darwin":
-		switch name {
-		case "vlc":
-			commonPaths = []string{
-				"/Applications/VLC.app/Contents/MacOS/VLC",
-			}
-		case "mpv":
-			commonPaths = []string{
-				"/Applications/mpv.app/Contents/MacOS/mpv",
-				"/opt/homebrew/bin/mpv",
-				"/usr/local/bin/mpv",
-			}
-		case "iina":
-			commonPaths = []string{
-				"/Applications/IINA.app/Contents/MacOS/iina-cli",
-			}
-		}
-	}
-
-	for _, p := range commonPaths {
+	for _, p := range defaultPaths(name) {
 		if _, err := os.Stat(p); err == nil {
-			return true
+			return p
 		}
 	}
+	return ""
+}
 
-	return false
+func defaultPaths(name string) []string {
+	switch runtime.GOOS {
+	case "windows":
+		return windowsPaths(name)
+	case "darwin":
+		return darwinPaths(name)
+	default:
+		return linuxPaths(name)
+	}
+}
+
+func windowsPaths(name string) []string {
+	switch name {
+	case "mpv":
+		return []string{
+			`C:\Program Files\mpv\mpv.exe`,
+			`C:\Program Files (x86)\mpv\mpv.exe`,
+			`C:\mpv\mpv.exe`,
+		}
+	case "vlc":
+		return []string{
+			`C:\Program Files\VideoLAN\VLC\vlc.exe`,
+			`C:\Program Files (x86)\VideoLAN\VLC\vlc.exe`,
+		}
+	}
+	return nil
+}
+
+func darwinPaths(name string) []string {
+	switch name {
+	case "mpv":
+		return []string{
+			"/Applications/mpv.app/Contents/MacOS/mpv",
+			"/opt/homebrew/bin/mpv",
+			"/usr/local/bin/mpv",
+		}
+	case "iina":
+		return []string{
+			"/Applications/IINA.app/Contents/MacOS/iina-cli",
+		}
+	case "vlc":
+		return []string{
+			"/Applications/VLC.app/Contents/MacOS/VLC",
+		}
+	}
+	return nil
+}
+
+func linuxPaths(name string) []string {
+	switch name {
+	case "mpv":
+		return []string{
+			"/usr/bin/mpv",
+			"/usr/local/bin/mpv",
+			"/snap/bin/mpv",
+		}
+	case "vlc":
+		return []string{
+			"/usr/bin/vlc",
+			"/usr/local/bin/vlc",
+			"/snap/bin/vlc",
+		}
+	case "haruna":
+		return []string{
+			"/usr/bin/haruna",
+			"/usr/local/bin/haruna",
+			"/snap/bin/haruna",
+			"/var/lib/flatpak/exports/bin/haruna",
+		}
+	}
+	return nil
+}
+
+func fileName(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[i+1:]
+	}
+	if i := strings.LastIndex(path, `\`); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }

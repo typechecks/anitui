@@ -1,0 +1,20 @@
+pkgbase = anitui
+	pkgver = __VERSION__
+	pkgrel = 1
+	pkgdesc = a tui for browsing and streaming anime
+	url = https://github.com/typechecks/anitui
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-only
+	makedepends = go
+	source = anitui-__VERSION__.tar.gz::https://github.com/typechecks/anitui/archive/v__VERSION__.tar.gz
+	sha256sums = SKIP
+	optdepends = mpv: media player for streaming
+	optdepends = vlc: media player for streaming
+	optdepends = haruna: media player for streaming
+
+pkgname = anitui
+	pkgdesc = a tui for browsing and streaming anime
+	optdepends = mpv: media player for streaming
+	optdepends = vlc: media player for streaming
+	optdepends = haruna: media player for streaming

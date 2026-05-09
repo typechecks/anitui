@@ -22,4 +22,5 @@ build() {
 
 package() {
   install -Dm755 "${srcdir}/${pkgname}-${pkgver}/anitui" "${pkgdir}/usr/bin/anitui"
+  install -Dm644 /dev/null "${pkgdir}/usr/share/anitui/.package-manager"
 }

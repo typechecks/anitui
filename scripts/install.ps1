@@ -1,29 +1,30 @@
-# anitui install script for Windows
-# downloads the latest binary and adds to path
+param(
+	[string]$InstallDir = "$HOME\.anitui"
+)
 
+$ErrorActionPreference = "Stop"
 $repo = "typechecks/anitui"
-$installDir = "$HOME\.anitui"
 
-if (!(Test-Path $installDir)) {
-    New-Item -ItemType Directory -Force -Path $installDir
+if (-not (Test-Path $InstallDir)) {
+	New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
 
 Write-Host "Detecting latest version..." -ForegroundColor Cyan
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
 $tag = $release.tag_name
 
-if (!$tag) {
-    Write-Error "Could not find latest release tag"
-    exit
+if (-not $tag) {
+	Write-Error "Could not find latest release tag"
+	exit 1
 }
 
-$arch = "amd64" # Default to amd64 for Windows
+$arch = "amd64"
 $binaryName = "anitui_windows_$arch.zip"
 $asset = $release.assets | Where-Object { $_.name -eq $binaryName }
 
-if (!$asset) {
-    Write-Error "Could not find asset $binaryName for version $tag"
-    exit
+if (-not $asset) {
+	Write-Error "Could not find asset $binaryName for version $tag"
+	exit 1
 }
 
 $url = $asset.browser_download_url
@@ -32,18 +33,19 @@ $zipPath = "$env:TEMP\anitui.zip"
 Write-Host "Downloading anitui $tag..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri $url -OutFile $zipPath
 
-Write-Host "Extracting to $installDir..." -ForegroundColor Cyan
-Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+Write-Host "Extracting to $InstallDir..." -ForegroundColor Cyan
+Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
 
-$exePath = Join-Path $installDir "anitui.exe"
+$exePath = Join-Path $InstallDir "anitui.exe"
 Remove-Item "$exePath.old" -ErrorAction SilentlyContinue
 
-# Add to User PATH if not already there
-$path = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($path -notlike "*$installDir*") {
-    Write-Host "Adding $installDir to PATH..." -ForegroundColor Cyan
-    [Environment]::SetEnvironmentVariable("Path", $path + ";$installDir", "User")
-    $env:Path += ";$installDir"
+if ($InstallDir -eq "$HOME\.anitui") {
+	$path = [Environment]::GetEnvironmentVariable("Path", "User")
+	if ($path -notlike "*$InstallDir*") {
+		Write-Host "Adding $InstallDir to PATH..." -ForegroundColor Cyan
+		[Environment]::SetEnvironmentVariable("Path", $path + ";$InstallDir", "User")
+		$env:Path += ";$InstallDir"
+	}
 }
 
 Remove-Item $zipPath
