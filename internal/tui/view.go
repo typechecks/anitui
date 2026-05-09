@@ -59,7 +59,17 @@ func (m Model) viewHome() string {
 		Faint(true).
 		Foreground(DimColor).
 		Render("v" + Version)
-	sb.WriteString(lipgloss.Place(m.width, 1, lipgloss.Right, lipgloss.Bottom, version))
+
+	// Calculate vertical space to push version to the bottom
+	logoHeight := lipgloss.Height(logo)
+	contentHeight := logoHeight + 2 + 1 + 2 + 3 + 1 + 1 // logo + gaps + mode + gap + search + gap + help
+	padding := m.height - contentHeight - 1
+	if padding > 0 {
+		sb.WriteString(strings.Repeat("\n", padding))
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Right, version))
 
 	return lipgloss.PlaceVertical(m.height, lipgloss.Center, sb.String())
 }

@@ -4,6 +4,26 @@ anitui
 a tui for browsing and streaming anime. scrapes from multiple sources,
 navigate with vim keys or arrows, and play in your preferred video player.
 
+installation
+------------
+
+### linux / macos
+
+```bash
+curl -sS https://raw.githubusercontent.com/typechecks/anitui/main/scripts/install.sh | sudo sh
+```
+
+### windows (powershell)
+
+```powershell
+iwr https://raw.githubusercontent.com/typechecks/anitui/main/scripts/install.ps1 -useb | iex
+```
+
+### package managers
+
+- **aur**: `yay -S anitui-bin`
+- **nix**: `nix run github:typechecks/anitui`
+
 quick start
 -----------
 
