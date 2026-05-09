@@ -17,24 +17,24 @@ builds:
     goarch:
       - amd64
       - arm64
-    main: ./cmd/anitui
+    main: ./cmd/anitui/main.go
     binary: anitui
     ldflags:
       - -s -w -X github.com/anitui/anitui/internal/tui.Version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     # use zip for windows
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc

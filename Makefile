@@ -29,10 +29,16 @@ clean:
 install:
 	go install $(CMD_DIR)
 
-build-linux:
-	set GOOS=linux&& set GOARCH=amd64&& go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)
+build-linux-amd64:
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)
 
-build-windows:
-	set GOOS=windows&& set GOARCH=amd64&& go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+build-linux-arm64:
+	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 $(CMD_DIR)
 
-build-all: build-linux build-windows
+build-windows-amd64:
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+
+build-windows-arm64:
+	GOOS=windows GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-arm64.exe $(CMD_DIR)
+
+build-all: build-linux-amd64 build-linux-arm64 build-windows-amd64 build-windows-arm64

@@ -31,3 +31,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: publish to winget
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: typechecks.anitui
+          installers-regex: '\.zip$' # Matches the windows zip from goreleaser
+          token: ${{ secrets.WINGET_TOKEN }}

@@ -23,6 +23,18 @@ iwr https://raw.githubusercontent.com/typechecks/anitui/main/scripts/install.ps1
 
 - **aur**: `yay -S anitui-bin`
 - **nix**: `nix run github:typechecks/anitui`
+- **winget**: `winget install typechecks.anitui`
+
+platform support
+----------------
+
+anitui is built for **linux**, **macos** (intel & apple silicon), and **windows**.
+
+| os | architectures |
+|----|---------------|
+| linux | amd64, arm64 |
+| macos | amd64, arm64 |
+| windows | amd64, arm64 |
 
 quick start
 -----------
@@ -77,6 +89,8 @@ make build
 cross-compile:
 
 ```bash
-make build-linux    # linux amd64 binary
-make build-windows  # windows amd64 binary
+make build-linux-amd64    # linux x86_64
+make build-linux-arm64    # linux arm64
+make build-windows-amd64  # windows x86_64
+make build-all            # build for all supported platforms
 ```
