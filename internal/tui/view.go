@@ -17,18 +17,25 @@ func modKey() string {
 	return "Ctrl"
 }
 
+func modeLabel(dub bool) string {
+	if dub {
+		return "DUB"
+	}
+	return "SUB"
+}
+
 func (m Model) View() string {
 	switch m.screen {
 	case ScreenHome:
 		return m.viewHome()
 	case ScreenSearching:
-		return m.viewSearching()
+		return m.viewLoading(m.loadingText)
 	case ScreenResults:
 		return m.viewResults()
 	case ScreenEpisodes:
 		return m.viewEpisodes()
 	case ScreenLoadingEpisode:
-		return m.viewLoadingEpisode()
+		return m.viewLoading(m.loadingText)
 	default:
 		return m.viewHome()
 	}
@@ -38,14 +45,10 @@ func (m Model) viewHome() string {
 	var center strings.Builder
 
 	logo := RenderAniTuiLogo(m.width)
-
 	center.WriteString(logo)
 	center.WriteString("\n\n")
 
-	mode := "SUB"
-	if m.dub {
-		mode = "DUB"
-	}
+	mode := modeLabel(m.dub)
 	modeLabel := lipgloss.NewStyle().
 		Foreground(AccentColor).
 		Bold(true).
@@ -77,7 +80,7 @@ func (m Model) viewHome() string {
 	return centered + "\n" + versionLine
 }
 
-func (m Model) viewSearching() string {
+func (m Model) viewLoading(text string) string {
 	var sb strings.Builder
 
 	header := lipgloss.NewStyle().
@@ -88,8 +91,7 @@ func (m Model) viewSearching() string {
 	sb.WriteString("\n\n")
 
 	spinnerChar := spinnerChars[m.spinIndex%len(spinnerChars)]
-
-	loading := fmt.Sprintf("%s %s", spinnerChar, m.loadingText)
+	loading := fmt.Sprintf("%s %s", spinnerChar, text)
 	sb.WriteString(LoadingStyle.Render(loading))
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, sb.String())
@@ -102,10 +104,7 @@ func (m Model) viewResults() string {
 
 	var sb strings.Builder
 
-	mode := "SUB"
-	if m.dub {
-		mode = "DUB"
-	}
+	mode := modeLabel(m.dub)
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(AccentColor).
@@ -114,10 +113,10 @@ func (m Model) viewResults() string {
 	sb.WriteString(header)
 	sb.WriteString("\n\n")
 
-	availableHeight := m.height - 8
+	availableHeight := max(1, m.height-8)
 	startIdx := 0
 	if m.cursor >= availableHeight {
-		startIdx = m.cursor - availableHeight + 1
+		startIdx = max(0, m.cursor-availableHeight+1)
 	}
 	endIdx := min(len(m.results), startIdx+availableHeight)
 
@@ -150,7 +149,8 @@ func (m Model) viewResults() string {
 		}
 	}
 
-	help := fmt.Sprintf("%d/%d results  |  ↑↓/jk navigate  |  Enter select  |  Esc back  |  / search", m.cursor+1, len(m.results))
+	help := fmt.Sprintf("%d/%d results  |  ↑↓/jk navigate  |  %s+U/D page  |  Enter select  |  Esc back  |  / search",
+		m.cursor+1, len(m.results), modKey())
 	sb.WriteString(HelpStyle.Render(help))
 
 	return sb.String()
@@ -176,10 +176,10 @@ func (m Model) viewEpisodes() string {
 	sb.WriteString(header)
 	sb.WriteString("\n\n")
 
-	availableHeight := m.height - 8
+	availableHeight := max(1, m.height-8)
 	startIdx := 0
 	if m.episodeCursor >= availableHeight {
-		startIdx = m.episodeCursor - availableHeight + 1
+		startIdx = max(0, m.episodeCursor-availableHeight+1)
 	}
 	endIdx := min(len(m.episodes), startIdx+availableHeight)
 
@@ -201,29 +201,12 @@ func (m Model) viewEpisodes() string {
 		sb.WriteString("\n")
 	}
 
-	help := fmt.Sprintf("%d/%d episodes  |  ↑↓/jk navigate  |  Enter play  |  Esc back", m.episodeCursor+1, len(m.episodes))
+	help := fmt.Sprintf("%d/%d episodes  |  ↑↓/jk navigate  |  %s+U/D page  |  Enter play  |  Esc back",
+		m.episodeCursor+1, len(m.episodes), modKey())
 	sb.WriteString("\n")
 	sb.WriteString(HelpStyle.Render(help))
 
 	return sb.String()
-}
-
-func (m Model) viewLoadingEpisode() string {
-	var sb strings.Builder
-
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(AccentColor).
-		Render("AniTUI")
-	sb.WriteString(header)
-	sb.WriteString("\n\n")
-
-	spinnerChar := spinnerChars[m.spinIndex%len(spinnerChars)]
-
-	loading := fmt.Sprintf("%s %s", spinnerChar, m.loadingText)
-	sb.WriteString(LoadingStyle.Render(loading))
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, sb.String())
 }
 
 func (m Model) viewError(errMsg string) string {

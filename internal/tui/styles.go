@@ -35,8 +35,7 @@ var (
 	SearchInputStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(AccentColor).
-				Padding(0, 1).
-				Width(60)
+				Padding(0, 1)
 
 	HelpStyle = lipgloss.NewStyle().
 			Faint(true).

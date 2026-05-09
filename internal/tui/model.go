@@ -27,25 +27,29 @@ const (
 	ScreenLoadingEpisode
 )
 
+const pageSize = 10
+
 var Version = "dev"
 
 var debugLog *log.Logger
 
 func init() {
-	if os.Getenv("ANITUI_DEBUG") != "" {
-		logPath := "anitui-tui-debug.log"
-		if tempDir := os.TempDir(); tempDir != "" {
-			logPath = os.ExpandEnv(fmt.Sprintf("%s/anitui-tui-debug.log", tempDir))
-		}
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			debugLog = log.New(io.Discard, "", 0)
-			return
-		}
-		debugLog = log.New(f, "", log.LstdFlags)
-	} else {
+	if os.Getenv("ANITUI_DEBUG") == "" {
 		debugLog = log.New(io.Discard, "", 0)
+		return
 	}
+
+	logPath := "anitui-tui-debug.log"
+	if tempDir := os.TempDir(); tempDir != "" {
+		logPath = os.ExpandEnv(fmt.Sprintf("%s/anitui-tui-debug.log", tempDir))
+	}
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		debugLog = log.New(io.Discard, "", 0)
+		return
+	}
+	debugLog = log.New(f, "", log.LstdFlags)
 }
 
 type searchResultsMsg struct {
@@ -67,13 +71,13 @@ type playDoneMsg struct {
 	err error
 }
 
-type tickMsg time.Time
+type tickMsg struct{}
 
 type Model struct {
-	screen    Screen
-	input     textinput.Model
-	width     int
-	height    int
+	screen Screen
+	input  textinput.Model
+	width  int
+	height int
 
 	scrapers      *scraper.UnifiedScraper
 	currentSource scraper.Scraper
@@ -108,11 +112,10 @@ func NewModel(scrapers *scraper.UnifiedScraper) Model {
 	ti.Focus()
 
 	return Model{
-		screen:       ScreenHome,
-		input:        ti,
-		scrapers:     scrapers,
-		dub:          false,
-		minLoadTime:  600 * time.Millisecond,
+		screen:      ScreenHome,
+		input:       ti,
+		scrapers:    scrapers,
+		minLoadTime: 600 * time.Millisecond,
 	}
 }
 
@@ -131,66 +134,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyMsg(msg)
 
 	case searchResultsMsg:
-		if time.Since(m.loadingSince) < m.minLoadTime {
+		if m.shouldDelay() {
 			m.pendingMsg = msg
 			return m, nil
 		}
 		m.pendingMsg = nil
-		if msg.err != nil {
-			m.errorMsg = msg.err.Error()
-			m.screen = ScreenResults
-			return m, nil
-		}
-		m.results = msg.results
-		m.cursor = 0
-		m.screen = ScreenResults
-		m.errorMsg = ""
-		if len(m.results) == 0 {
-			m.errorMsg = fmt.Sprintf("No results found for '%s'", m.query)
-		}
-		return m, nil
+		return m.applySearchResults(msg)
 
 	case episodesMsg:
-		if time.Since(m.loadingSince) < m.minLoadTime {
+		if m.shouldDelay() {
 			m.pendingMsg = msg
 			return m, nil
 		}
 		m.pendingMsg = nil
-		if msg.err != nil {
-			m.errorMsg = msg.err.Error()
-			m.screen = ScreenEpisodes
-			return m, nil
-		}
-		m.episodes = msg.episodes
-		m.episodeCursor = 0
-		m.screen = ScreenEpisodes
-		m.errorMsg = ""
-		return m, nil
+		return m.applyEpisodes(msg)
 
 	case videoSourcesMsg:
 		debugLog.Printf("[TUI] videoSourcesMsg: err=%v sources=%d screen=%d", msg.err, len(msg.sources), m.screen)
-		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("Failed to load video: %v", msg.err)
-			m.screen = ScreenEpisodes
+		if msg.err != nil || len(msg.sources) == 0 {
 			m.pendingMsg = nil
-			return m, nil
+			return m.applyVideoSources(msg)
 		}
-		if len(msg.sources) == 0 {
-			m.errorMsg = "No video sources found for this episode"
-			m.screen = ScreenEpisodes
-			m.pendingMsg = nil
-			return m, nil
-		}
-
-		if time.Since(m.loadingSince) < m.minLoadTime {
+		if m.shouldDelay() {
 			m.pendingMsg = msg
 			return m, nil
 		}
-
-		debugLog.Printf("[TUI] Got %d sources, launching player. URL=%s", len(msg.sources), msg.sources[0].URL)
-		m.screen = ScreenEpisodes
 		m.pendingMsg = nil
-		return m, m.playEpisode(msg.sources)
+		return m.applyVideoSources(msg)
 
 	case playDoneMsg:
 		debugLog.Printf("[TUI] playDoneMsg: err=%v", msg.err)
@@ -200,51 +170,83 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		m.spinIndex++
-		if m.pendingMsg != nil && time.Since(m.loadingSince) >= m.minLoadTime {
-			p := m.pendingMsg
-			m.pendingMsg = nil
-			switch msg := p.(type) {
-			case searchResultsMsg:
-				if msg.err != nil {
-					m.errorMsg = msg.err.Error()
-				} else {
-					m.results = msg.results
-					m.cursor = 0
-					m.errorMsg = ""
-					if len(m.results) == 0 {
-						m.errorMsg = fmt.Sprintf("No results found for '%s'", m.query)
-					}
-				}
-				m.screen = ScreenResults
-				return m, nil
-			case episodesMsg:
-				if msg.err != nil {
-					m.errorMsg = msg.err.Error()
-				} else {
-					m.episodes = msg.episodes
-					m.episodeCursor = 0
-					m.errorMsg = ""
-				}
-				m.screen = ScreenEpisodes
-				return m, nil
-			case videoSourcesMsg:
-				if msg.err == nil && len(msg.sources) > 0 {
-					debugLog.Printf("[TUI] Delayed play: URL=%s", msg.sources[0].URL)
-					m.screen = ScreenEpisodes
-					return m, m.playEpisode(msg.sources)
-				}
-				m.screen = ScreenEpisodes
-				return m, nil
-			}
-		}
-		if m.screen == ScreenSearching || m.screen == ScreenLoadingEpisode {
-			return m, tickCmd()
-		}
-		return m, nil
+		return m.handleTick()
+
 	}
 
 	return m, nil
+}
+
+func (m Model) shouldDelay() bool {
+	return time.Since(m.loadingSince) < m.minLoadTime
+}
+
+func (m Model) handleTick() (tea.Model, tea.Cmd) {
+	m.spinIndex++
+
+	if m.pendingMsg != nil && !m.shouldDelay() {
+		msg := m.pendingMsg
+		m.pendingMsg = nil
+		switch p := msg.(type) {
+		case searchResultsMsg:
+			return m.applySearchResults(p)
+		case episodesMsg:
+			return m.applyEpisodes(p)
+		case videoSourcesMsg:
+			return m.applyVideoSources(p)
+		}
+	}
+
+	if m.screen == ScreenSearching || m.screen == ScreenLoadingEpisode {
+		return m, tickCmd()
+	}
+	return m, nil
+}
+
+func (m Model) applySearchResults(msg searchResultsMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.errorMsg = msg.err.Error()
+		m.screen = ScreenResults
+		return m, nil
+	}
+	m.results = msg.results
+	m.cursor = 0
+	m.screen = ScreenResults
+	m.errorMsg = ""
+	if len(m.results) == 0 {
+		m.errorMsg = fmt.Sprintf("No results found for '%s'", m.query)
+	}
+	return m, nil
+}
+
+func (m Model) applyEpisodes(msg episodesMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.errorMsg = msg.err.Error()
+		m.screen = ScreenEpisodes
+		return m, nil
+	}
+	m.episodes = msg.episodes
+	m.episodeCursor = 0
+	m.screen = ScreenEpisodes
+	m.errorMsg = ""
+	return m, nil
+}
+
+func (m Model) applyVideoSources(msg videoSourcesMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.errorMsg = fmt.Sprintf("Failed to load video: %v", msg.err)
+		m.screen = ScreenEpisodes
+		return m, nil
+	}
+	if len(msg.sources) == 0 {
+		m.errorMsg = "No video sources found for this episode"
+		m.screen = ScreenEpisodes
+		return m, nil
+	}
+
+	debugLog.Printf("[TUI] Got %d sources, launching player. URL=%s", len(msg.sources), msg.sources[0].URL)
+	m.screen = ScreenEpisodes
+	return m, m.playEpisode(msg.sources)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -366,7 +368,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 
 		m.currentSource = m.scrapers.GetScraper(anime.Source)
 		if m.currentSource == nil {
-			// Fallback or handle error
 			m.currentSource = m.scrapers.GetScraper("allanime.day")
 		}
 		return m, tea.Batch(m.loadEpisodes(anime.URL), tickCmd())
@@ -392,9 +393,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleUp() (tea.Model, tea.Cmd) {
-	if m.screen == ScreenHome {
-		return m, nil
-	}
 	switch m.screen {
 	case ScreenResults:
 		if m.cursor > 0 {
@@ -409,9 +407,6 @@ func (m Model) handleUp() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDown() (tea.Model, tea.Cmd) {
-	if m.screen == ScreenHome {
-		return m, nil
-	}
 	switch m.screen {
 	case ScreenResults:
 		if m.cursor < len(m.results)-1 {
@@ -454,7 +449,6 @@ func (m Model) handleCapitalG() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleCtrlU() (tea.Model, tea.Cmd) {
-	pageSize := 10
 	switch m.screen {
 	case ScreenResults:
 		m.cursor = max(0, m.cursor-pageSize)
@@ -465,7 +459,6 @@ func (m Model) handleCtrlU() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleCtrlD() (tea.Model, tea.Cmd) {
-	pageSize := 10
 	switch m.screen {
 	case ScreenResults:
 		if len(m.results) > 0 {
@@ -524,7 +517,7 @@ func (m Model) playEpisode(sources []models.VideoSource) tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
-		return tickMsg(t)
+	return tea.Tick(time.Millisecond*200, func(_ time.Time) tea.Msg {
+		return tickMsg{}
 	})
 }

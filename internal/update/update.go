@@ -39,7 +39,13 @@ func Cleanup() {
 	os.Remove(exe + ".old")
 }
 
+var cachedRelease *release
+
 func fetchRelease() (*release, error) {
+	if cachedRelease != nil {
+		return cachedRelease, nil
+	}
+
 	req, err := http.NewRequest("GET", repoAPI, nil)
 	if err != nil {
 		return nil, err
@@ -62,7 +68,8 @@ func fetchRelease() (*release, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
 		return nil, err
 	}
-	return &rel, nil
+	cachedRelease = &rel
+	return cachedRelease, nil
 }
 
 func Check(currentVersion string) (string, error) {
@@ -169,7 +176,7 @@ func Apply(version string) error {
 	}
 
 	newExe := exe + ".new"
-	err = extractBinary(tmpPath, newExe)
+	err = extractBinary(tmpPath, target.Name, newExe)
 	if err != nil {
 		return fmt.Errorf("extracting binary: %w", err)
 	}
@@ -309,8 +316,8 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func extractBinary(archivePath, destPath string) error {
-	if strings.HasSuffix(strings.ToLower(archivePath), ".zip") {
+func extractBinary(archivePath, archiveName, destPath string) error {
+	if strings.HasSuffix(strings.ToLower(archiveName), ".zip") {
 		return extractFromZip(archivePath, destPath)
 	}
 	return extractFromTarGz(archivePath, destPath)

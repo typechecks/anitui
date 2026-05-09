@@ -2,6 +2,7 @@ package player
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -48,8 +49,8 @@ func Play(url string) error {
 	}
 
 	cmd := exec.Command(player, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	cmd.Stdin = nil
 
 	cmd.Env = os.Environ()

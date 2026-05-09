@@ -4,8 +4,8 @@ BINARY_NAME=anitui
 CMD_DIR=./cmd/anitui
 BUILD_DIR=./build
 
-UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
-ifeq ($(UNAME_S),Windows)
+GOOS := $(shell go env GOOS 2>/dev/null || echo unknown)
+ifeq ($(GOOS),windows)
 	EXT = .exe
 else
 	EXT =
