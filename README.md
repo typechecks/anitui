@@ -22,7 +22,6 @@ iwr https://raw.githubusercontent.com/typechecks/anitui/main/scripts/install.ps1
 ### package managers
 
 - **aur**: `yay -S anitui-bin` (prebuilt) or `yay -S anitui` (build from source)
-- **nix**: `nix run github:typechecks/anitui`
 - **winget**: `winget install typechecks.anitui`
 
 platform support
