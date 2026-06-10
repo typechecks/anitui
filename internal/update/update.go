@@ -218,6 +218,7 @@ func applyWindows(exeDir string) error {
 	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(tmpDir)
 	zipPath := filepath.Join(tmpDir, "anitui.zip")
 	extractDir := filepath.Join(tmpDir, "anitui_next")
 
@@ -226,66 +227,65 @@ func applyWindows(exeDir string) error {
 	req.Header.Set("User-Agent", "anitui")
 	resp, err := client.Do(req)
 	if err != nil {
-		os.RemoveAll(tmpDir)
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		os.RemoveAll(tmpDir)
 		return fmt.Errorf("download failed: status %d", resp.StatusCode)
 	}
 
 	zf, err := os.Create(zipPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
 		return err
 	}
 	if _, err := io.Copy(zf, resp.Body); err != nil {
 		zf.Close()
-		os.RemoveAll(tmpDir)
 		return err
 	}
 	zf.Close()
 
-	// Extract zip using PowerShell (Expand-Archive is native)
 	if err := exec.Command("powershell", "-Command",
-		"Expand-Archive", "-Path", zipPath, "-DestinationPath", extractDir, "-Force",
+		fmt.Sprintf("Expand-Archive -Path '%s' -DestinationPath '%s' -Force", zipPath, extractDir),
 	).Run(); err != nil {
-		os.RemoveAll(tmpDir)
 		return fmt.Errorf("extraction failed: %v", err)
 	}
 
 	newExe := filepath.Join(extractDir, "anitui.exe")
 	if _, err := os.Stat(newExe); err != nil {
-		os.RemoveAll(tmpDir)
 		return fmt.Errorf("extracted binary not found: %v", err)
 	}
 
-	// Write launcher PowerShell script that waits, kills, swaps, restarts
-	launcherPath := filepath.Join(tmpDir, "anitui_update.ps1")
-	launcherContent := fmt.Sprintf(`$ErrorActionPreference = "Stop"
-Start-Sleep -Seconds 3
-Get-Process anitui -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 1
-Copy-Item "%s\anitui.exe" "%s\anitui.exe" -Force
-Remove-Item -Recurse -Force "%s" -ErrorAction SilentlyContinue
-Start-Process "%s\anitui.exe"
-`, extractDir, exeDir, tmpDir, exeDir)
-
-	if err := os.WriteFile(launcherPath, []byte(launcherContent), 0644); err != nil {
-		os.RemoveAll(tmpDir)
+	exe, err := os.Executable()
+	if err != nil {
 		return err
 	}
 
-	// Start the launcher detached (hidden window)
-	cmd := exec.Command("powershell",
-		"-ExecutionPolicy", "Bypass",
-		"-WindowStyle", "Hidden",
-		"-File", launcherPath,
-	)
-	if err := cmd.Start(); err != nil {
-		os.RemoveAll(tmpDir)
+	oldExe := exe + ".old"
+	os.Remove(oldExe)
+	if err := os.Rename(exe, oldExe); err != nil {
+		return fmt.Errorf("rename current exe: %v", err)
+	}
+
+	src, err := os.Open(newExe)
+	if err != nil {
+		os.Rename(oldExe, exe)
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(exe)
+	if err != nil {
+		src.Close()
+		os.Rename(oldExe, exe)
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		src.Close()
+		os.Rename(oldExe, exe)
 		return err
 	}
 

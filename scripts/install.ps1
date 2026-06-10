@@ -78,7 +78,7 @@ Start-Process "$InstallDir\anitui.exe"
 	Write-Host "Launcher started. The app will restart automatically after update." -ForegroundColor Green
 } else {
 	Write-Host "Installing to $InstallDir..." -ForegroundColor Cyan
-	Copy-Item $newExe "$InstallDir\anitui.exe" -Force
+	Copy-Item "$newExe" "$InstallDir\anitui.exe" -Force
 
 	if ($InstallDir -eq "$HOME\.anitui") {
 		$path = [Environment]::GetEnvironmentVariable("Path", "User")
