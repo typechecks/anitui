@@ -25,11 +25,12 @@ const (
 	ScreenResults
 	ScreenEpisodes
 	ScreenLoadingEpisode
+	ScreenWatching
 )
 
 const pageSize = 10
 
-var Version = "dev"
+var Version = "0.2.0"
 
 var debugLog *log.Logger
 
@@ -73,6 +74,15 @@ type playDoneMsg struct {
 
 type tickMsg struct{}
 
+type watchingState struct {
+	animeTitle   string
+	episodeIndex  int
+	episodesLen   int
+	sources       []models.VideoSource
+	sourceIndex   int
+	dub           bool
+}
+
 type Model struct {
 	screen Screen
 	input  textinput.Model
@@ -92,10 +102,14 @@ type Model struct {
 	selectedAnime *models.Anime
 	episodeCursor int
 
+	showFullSynopsis bool
+
 	spinIndex int
 
 	lastKey string
 	dub     bool
+
+	watching *watchingState
 
 	loadingSince time.Time
 	pendingMsg   tea.Msg
@@ -116,6 +130,7 @@ func NewModel(scrapers *scraper.UnifiedScraper) Model {
 		input:       ti,
 		scrapers:    scrapers,
 		minLoadTime: 600 * time.Millisecond,
+		dub:         scraper.LoadDubPref(),
 	}
 }
 
@@ -223,9 +238,33 @@ func (m Model) applyEpisodes(msg episodesMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.errorMsg = msg.err.Error()
 		m.screen = ScreenEpisodes
+		m.watching = nil
 		return m, nil
 	}
 	m.episodes = msg.episodes
+
+	// Handle dub toggle from watching screen: find matching episode and load video
+	if m.watching != nil && m.screen == ScreenLoadingEpisode {
+		if len(msg.episodes) == 0 {
+			m.errorMsg = "No episodes found for this language"
+			m.screen = ScreenEpisodes
+			m.watching = nil
+			return m, nil
+		}
+		if m.watching.episodeIndex < len(msg.episodes) {
+			m.episodeCursor = m.watching.episodeIndex
+		} else {
+			m.episodeCursor = 0
+		}
+		m.watching.dub = m.dub
+		episode := m.episodes[m.episodeCursor]
+		m.loadingText = fmt.Sprintf("Fetching video for %s...", episode.Title)
+		m.spinIndex = 0
+		m.loadingSince = time.Now()
+		m.pendingMsg = nil
+		return m, tea.Batch(m.loadVideoURL(episode.URL), tickCmd())
+	}
+
 	m.episodeCursor = 0
 	m.screen = ScreenEpisodes
 	m.errorMsg = ""
@@ -236,20 +275,54 @@ func (m Model) applyVideoSources(msg videoSourcesMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.errorMsg = fmt.Sprintf("Failed to load video: %v", msg.err)
 		m.screen = ScreenEpisodes
+		m.watching = nil
 		return m, nil
 	}
 	if len(msg.sources) == 0 {
 		m.errorMsg = "No video sources found for this episode"
 		m.screen = ScreenEpisodes
+		m.watching = nil
 		return m, nil
 	}
 
 	debugLog.Printf("[TUI] Got %d sources, launching player. URL=%s", len(msg.sources), msg.sources[0].URL)
-	m.screen = ScreenEpisodes
+	m.watching = &watchingState{
+		animeTitle:   func() string { if m.selectedAnime != nil { return m.selectedAnime.Title }; return "" }(),
+		episodeIndex: m.episodeCursor,
+		episodesLen:  len(m.episodes),
+		sources:      msg.sources,
+		sourceIndex:  0,
+		dub:          m.dub,
+	}
+	m.screen = ScreenWatching
 	return m, m.playEpisode(msg.sources)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Loading screens are cancelable
+	if m.screen == ScreenSearching || m.screen == ScreenLoadingEpisode {
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.pendingMsg = nil
+			m.errorMsg = ""
+			if m.screen == ScreenSearching {
+				m.screen = ScreenHome
+				m.input.Reset()
+				m.input.Focus()
+				m.results = nil
+				m.episodes = nil
+				m.cursor = 0
+				return m, textinput.Blink
+			}
+			// ScreenLoadingEpisode — cancel video loading
+			m.watching = nil
+			m.screen = ScreenEpisodes
+			return m, nil
+		}
+	}
+
 	if m.screen == ScreenHome {
 		switch msg.String() {
 		case "ctrl+c":
@@ -259,14 +332,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.input.Focus()
 			return m, textinput.Blink
-		case "tab":
-			m.dub = !m.dub
-			if m.dub {
-				m.input.Placeholder = "Search anime (dub)..."
-			} else {
-				m.input.Placeholder = "Search anime..."
-			}
-			return m, nil
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -274,6 +339,90 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.screen == ScreenWatching {
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			return m.handleEsc()
+		case "left", "h":
+			if m.watching != nil && m.watching.episodeIndex > 0 {
+				m.watching.episodeIndex--
+				m.episodeCursor = m.watching.episodeIndex
+				m.screen = ScreenLoadingEpisode
+				m.loadingText = "Loading previous episode..."
+				m.spinIndex = 0
+				m.errorMsg = ""
+				m.loadingSince = time.Now()
+				m.pendingMsg = nil
+				episode := m.episodes[m.episodeCursor]
+				return m, tea.Batch(m.loadVideoURL(episode.URL), tickCmd())
+			}
+			return m, nil
+		case "right", "l":
+			if m.watching != nil && m.watching.episodeIndex < m.watching.episodesLen-1 {
+				m.watching.episodeIndex++
+				m.episodeCursor = m.watching.episodeIndex
+				m.screen = ScreenLoadingEpisode
+				m.loadingText = "Loading next episode..."
+				m.spinIndex = 0
+				m.errorMsg = ""
+				m.loadingSince = time.Now()
+				m.pendingMsg = nil
+				episode := m.episodes[m.episodeCursor]
+				return m, tea.Batch(m.loadVideoURL(episode.URL), tickCmd())
+			}
+			return m, nil
+		case " ":
+			if m.watching != nil {
+				m.screen = ScreenLoadingEpisode
+				m.loadingText = "Replaying episode..."
+				m.spinIndex = 0
+				m.errorMsg = ""
+				m.loadingSince = time.Now()
+				m.pendingMsg = nil
+				episode := m.episodes[m.episodeCursor]
+				return m, tea.Batch(m.loadVideoURL(episode.URL), tickCmd())
+			}
+			return m, nil
+		case "r":
+			if m.watching != nil {
+				m.screen = ScreenLoadingEpisode
+				m.loadingText = "Replaying episode..."
+				m.spinIndex = 0
+				m.errorMsg = ""
+				m.loadingSince = time.Now()
+				m.pendingMsg = nil
+				episode := m.episodes[m.episodeCursor]
+				return m, tea.Batch(m.loadVideoURL(episode.URL), tickCmd())
+			}
+			return m, nil
+		case "s":
+			if m.watching != nil && len(m.watching.sources) > 0 {
+				m.watching.sourceIndex = (m.watching.sourceIndex + 1) % len(m.watching.sources)
+				m.screen = ScreenWatching
+				return m, tea.Batch(m.playEpisode(m.watching.sources))
+			}
+			return m, nil
+		case "d":
+			if m.watching != nil {
+				m.dub = !m.dub
+				scraper.SaveDubPref(m.dub)
+				m.watching.dub = m.dub
+				if m.selectedAnime != nil {
+					m.screen = ScreenLoadingEpisode
+					m.loadingText = fmt.Sprintf("Switching to %s...", map[bool]string{true: "dub", false: "sub"}[m.dub])
+					m.spinIndex = 0
+					m.errorMsg = ""
+					m.loadingSince = time.Now()
+					m.pendingMsg = nil
+					return m, tea.Batch(m.loadEpisodes(m.selectedAnime.URL), tickCmd())
+				}
+			}
+			return m, nil
+	}
+	return m, nil
+}
 	key := msg.String()
 	isDoubleG := key == "g" && m.lastKey == "g"
 	m.lastKey = key
@@ -308,6 +457,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key == "/":
 		return m.handleSlash()
+
+	case key == " " && m.screen == ScreenEpisodes:
+		if m.selectedAnime != nil && m.selectedAnime.Synopsis != "" {
+			m.showFullSynopsis = !m.showFullSynopsis
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -329,6 +484,11 @@ func (m Model) handleEsc() (tea.Model, tea.Cmd) {
 		m.episodeCursor = 0
 		m.errorMsg = ""
 		m.cursor = 0
+		return m, nil
+	case ScreenWatching:
+		m.screen = ScreenEpisodes
+		m.watching = nil
+		m.errorMsg = ""
 		return m, nil
 	default:
 		return m, nil
@@ -508,8 +668,12 @@ func (m Model) loadVideoURL(url string) tea.Cmd {
 
 func (m Model) playEpisode(sources []models.VideoSource) tea.Cmd {
 	return func() tea.Msg {
-		videoURL := sources[0].URL
-		debugLog.Printf("[TUI] playEpisode: calling player.Play(%s)", videoURL)
+		sourceIdx := 0
+		if m.watching != nil && m.watching.sourceIndex < len(sources) {
+			sourceIdx = m.watching.sourceIndex
+		}
+		videoURL := sources[sourceIdx].URL
+		debugLog.Printf("[TUI] playEpisode: calling player.Play(%s) (source index %d)", videoURL, sourceIdx)
 		err := player.Play(videoURL)
 		debugLog.Printf("[TUI] playEpisode: player.Play returned err=%v", err)
 		return playDoneMsg{err: err}

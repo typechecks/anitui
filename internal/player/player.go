@@ -15,7 +15,6 @@ func DetectPlayer() string {
 	if envPlayer := os.Getenv("ANITUI_PLAYER"); envPlayer != "" {
 		return envPlayer
 	}
-
 	for _, player := range playerPriority {
 		if path := findPlayer(player); path != "" {
 			return path
@@ -75,85 +74,20 @@ func findPlayer(name string) string {
 		return path
 	}
 
-	for _, p := range defaultPaths(name) {
-		if _, err := os.Stat(p); err == nil {
-			return p
+	if runtime.GOOS == "darwin" && name == "iina" {
+		if path, err := exec.LookPath("iina-cli"); err == nil {
+			return path
 		}
 	}
-	return ""
-}
 
-func defaultPaths(name string) []string {
 	switch runtime.GOOS {
 	case "windows":
-		return windowsPaths(name)
+		return findOnWindows(name)
 	case "darwin":
-		return darwinPaths(name)
-	default:
-		return linuxPaths(name)
+		return findOnDarwin(name)
 	}
-}
 
-func windowsPaths(name string) []string {
-	switch name {
-	case "mpv":
-		return []string{
-			`C:\Program Files\mpv\mpv.exe`,
-			`C:\Program Files (x86)\mpv\mpv.exe`,
-			`C:\mpv\mpv.exe`,
-		}
-	case "vlc":
-		return []string{
-			`C:\Program Files\VideoLAN\VLC\vlc.exe`,
-			`C:\Program Files (x86)\VideoLAN\VLC\vlc.exe`,
-		}
-	}
-	return nil
-}
-
-func darwinPaths(name string) []string {
-	switch name {
-	case "mpv":
-		return []string{
-			"/Applications/mpv.app/Contents/MacOS/mpv",
-			"/opt/homebrew/bin/mpv",
-			"/usr/local/bin/mpv",
-		}
-	case "iina":
-		return []string{
-			"/Applications/IINA.app/Contents/MacOS/iina-cli",
-		}
-	case "vlc":
-		return []string{
-			"/Applications/VLC.app/Contents/MacOS/VLC",
-		}
-	}
-	return nil
-}
-
-func linuxPaths(name string) []string {
-	switch name {
-	case "mpv":
-		return []string{
-			"/usr/bin/mpv",
-			"/usr/local/bin/mpv",
-			"/snap/bin/mpv",
-		}
-	case "vlc":
-		return []string{
-			"/usr/bin/vlc",
-			"/usr/local/bin/vlc",
-			"/snap/bin/vlc",
-		}
-	case "haruna":
-		return []string{
-			"/usr/bin/haruna",
-			"/usr/local/bin/haruna",
-			"/snap/bin/haruna",
-			"/var/lib/flatpak/exports/bin/haruna",
-		}
-	}
-	return nil
+	return ""
 }
 
 func fileName(path string) string {

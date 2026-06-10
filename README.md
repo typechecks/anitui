@@ -52,6 +52,8 @@ go run ./cmd/anitui
 controls
 --------
 
+### navigation
+
 | key | action |
 |-----|--------|
 | enter | confirm / select |
@@ -63,7 +65,31 @@ controls
 | ctrl+u / ⌘u | page up |
 | ctrl+d / ⌘d | page down |
 | / | search |
+| ? | toggle help popup |
 | ctrl+c / ⌘c | exit |
+
+### episode screen
+
+| key | action |
+|-----|--------|
+| j / ↓ | down |
+| k / ↑ | up |
+| enter | play episode |
+| space | toggle synopsis expand |
+| d | toggle sub / dub |
+| esc | back to results |
+
+### watching screen
+
+| key | action |
+|-----|--------|
+| h / ← | previous episode |
+| l / → | next episode |
+| r | replay current episode |
+| space | replay current episode |
+| s | cycle video source |
+| d | toggle sub / dub |
+| esc | back to episode list |
 
 player support
 --------------

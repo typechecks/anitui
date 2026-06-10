@@ -1,0 +1,34 @@
+# Binaries
+build/
+*.exe
+*.exe~
+anitui
+anitui.exe
+
+# Test artifacts
+*.test
+*.test.exe
+internal/scraper/allanime_test.py
+
+# Debug / screenshots
+debug_render.go
+mpv-shot*.jpg
+
+# Stray files
+Steins
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+
+# Swarm state (opencode)
+.swarm/

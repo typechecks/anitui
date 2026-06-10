@@ -5,7 +5,6 @@ import "github.com/charmbracelet/lipgloss"
 var (
 	AccentColor    = lipgloss.AdaptiveColor{Light: "4", Dark: "12"}
 	DimColor       = lipgloss.AdaptiveColor{Light: "245", Dark: "240"}
-	SuccessColor   = lipgloss.AdaptiveColor{Light: "2", Dark: "10"}
 	ErrorColor     = lipgloss.AdaptiveColor{Light: "1", Dark: "9"}
 	HighlightColor = lipgloss.AdaptiveColor{Light: "3", Dark: "11"}
 )
@@ -53,4 +52,8 @@ var (
 
 	EpisodeStyle = lipgloss.NewStyle().
 			PaddingLeft(2)
+
+	ControlStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(AccentColor)
 )

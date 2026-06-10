@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,13 +22,225 @@ import (
 	"time"
 
 	"github.com/anitui/anitui/internal/models"
+	"go.etcd.io/bbolt"
 )
+
+var db *bbolt.DB
+
+func init() {
+	path := defaultCachePath()
+	dir := filepath.Dir(path)
+	os.MkdirAll(dir, 0755)
+
+	var err error
+	db, err = bbolt.Open(path, 0600, &bbolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		db = nil
+		return
+	}
+
+	db.Update(func(tx *bbolt.Tx) error {
+		tx.CreateBucketIfNotExists([]byte("show_names"))
+		tx.CreateBucketIfNotExists([]byte("episode_titles"))
+		tx.CreateBucketIfNotExists([]byte("prefs"))
+		tx.CreateBucketIfNotExists([]byte("anime_details"))
+		return nil
+	})
+
+	loadCaches()
+	pruneStaleCaches()
+}
+
+func defaultCachePath() string {
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		return filepath.Join(localAppData, "anitui", "cache.db")
+	}
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "anitui", "cache.db")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		return filepath.Join(home, ".cache", "anitui", "cache.db")
+	}
+	return filepath.Join(os.TempDir(), "anitui-cache.db")
+}
+
+func loadCaches() {
+	if db == nil {
+		return
+	}
+
+	db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("show_names"))
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		showNameCache.Lock()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			showNameCache.data[string(k)] = string(v)
+		}
+		showNameCache.Unlock()
+		return nil
+	})
+
+	db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("episode_titles"))
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		anilistCache.Lock()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var titles []string
+			if json.Unmarshal(v, &titles) == nil {
+				anilistCache.data[string(k)] = titles
+			}
+		}
+		anilistCache.Unlock()
+		return nil
+	})
+}
+
+func pruneStaleCaches() {
+	if db == nil {
+		return
+	}
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("anime_details"))
+		if b == nil {
+			return nil
+		}
+		var staleKeys [][]byte
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var entry animeDetailEntry
+			if json.Unmarshal(v, &entry) != nil {
+				staleKeys = append(staleKeys, k)
+				continue
+			}
+			if time.Since(entry.CachedAt) > cacheTTL {
+				staleKeys = append(staleKeys, k)
+			}
+		}
+		for _, k := range staleKeys {
+			b.Delete(k)
+		}
+		return nil
+	})
+}
+
+func saveShowName(showID, name string) {
+	showNameCache.Lock()
+	showNameCache.data[showID] = name
+	showNameCache.Unlock()
+
+	if db == nil {
+		return
+	}
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("show_names"))
+		return b.Put([]byte(showID), []byte(name))
+	})
+}
+
+func saveEpisodeTitles(showID string, titles []string) {
+	if db == nil {
+		return
+	}
+	data, err := json.Marshal(titles)
+	if err != nil {
+		return
+	}
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("episode_titles"))
+		return b.Put([]byte(showID), data)
+	})
+}
+
+type animeDetailEntry struct {
+	Detail   animeDetail `json:"detail"`
+	CachedAt time.Time   `json:"cached_at"`
+}
+
+func saveAnimeDetail(name string, detail *animeDetail) {
+	animeDetailCache.Lock()
+	animeDetailCache.data[name] = detail
+	animeDetailCache.Unlock()
+
+	if db == nil {
+		return
+	}
+	entry := animeDetailEntry{Detail: *detail, CachedAt: time.Now()}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("anime_details"))
+		return b.Put([]byte(name), data)
+	})
+}
+
+func loadAnimeDetail(name string) *animeDetail {
+	// Check in-memory cache first
+	animeDetailCache.Lock()
+	if d, ok := animeDetailCache.data[name]; ok {
+		animeDetailCache.Unlock()
+		return d
+	}
+	animeDetailCache.Unlock()
+
+	// Check bbolt cache
+	if db == nil {
+		return nil
+	}
+	var entry animeDetailEntry
+	err := db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("anime_details"))
+		if b == nil {
+			return nil
+		}
+		v := b.Get([]byte(name))
+		if v == nil {
+			return nil
+		}
+		return json.Unmarshal(v, &entry)
+	})
+	if err != nil || entry.CachedAt.IsZero() {
+		return nil
+	}
+
+	// Check TTL
+	if time.Since(entry.CachedAt) > cacheTTL {
+		return nil
+	}
+
+	// Promote to in-memory cache
+	animeDetailCache.Lock()
+	animeDetailCache.data[name] = &entry.Detail
+	animeDetailCache.Unlock()
+
+	return &entry.Detail
+}
+
+func cachedFetchAnimeDetails(animeName string) *animeDetail {
+	if detail := loadAnimeDetail(animeName); detail != nil {
+		return detail
+	}
+	detail := fetchAnimeDetails(animeName)
+	if detail != nil {
+		saveAnimeDetail(animeName, detail)
+	}
+	return detail
+}
 
 const (
 	allanimeRefr   = "https://allmanga.to"
 	allanimeBase   = "allanime.day"
 	allanimeAPI    = "https://api." + allanimeBase
 	allanimeKeyStr = "Xot36i3lK3:v1"
+	cacheTTL       = 24 * time.Hour
 )
 
 var allanimeKey = sha256Key(allanimeKeyStr)
@@ -98,6 +312,46 @@ func (s *AllanimeScraper) Search(query string, dub bool) ([]models.Anime, error)
 		})
 	}
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	for i := range animeList {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			detail := cachedFetchAnimeDetails(animeList[idx].Title)
+			if detail == nil {
+				qLower := strings.ToLower(query)
+				nLower := strings.ToLower(animeList[idx].Title)
+				if !strings.Contains(nLower, qLower) {
+					detail = cachedFetchAnimeDetails(query)
+				}
+			}
+			if detail != nil {
+				if detail.EnglishTitle != "" {
+					animeList[idx].Title = detail.EnglishTitle
+				}
+				if detail.Episodes > animeList[idx].EpisodeCount {
+					animeList[idx].EpisodeCount = detail.Episodes
+				}
+				animeList[idx].Score = float64(detail.Score) / 10.0
+				animeList[idx].Year = detail.Year
+				animeList[idx].Synopsis = detail.Synopsis
+				animeList[idx].Genres = detail.Genres
+				animeList[idx].Type = detail.Format
+				animeList[idx].Studio = detail.Studio
+				animeList[idx].Status = detail.Status
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for _, a := range animeList {
+		saveShowName(a.URL, a.Title)
+	}
+
 	return animeList, nil
 }
 
@@ -136,10 +390,18 @@ func (s *AllanimeScraper) GetEpisodes(showID string, dub bool) ([]models.Episode
 		epNums = result.Data.Show.Detail.Sub
 	}
 
-	anilistTitles := fetchEpisodeTitlesSync(showID, result.Data.Show.Name)
+	showName := result.Data.Show.Name
+	showNameCache.Lock()
+	if cached, ok := showNameCache.data[showID]; ok {
+		showName = cached
+	}
+	showNameCache.Unlock()
+	anilistTitles := fetchEpisodeTitlesSync(showID, showName)
 
 	var episodes []models.Episode
 	for _, num := range epNums {
+		num = strings.TrimPrefix(num, "EP ")
+		num = strings.TrimPrefix(num, "Episode ")
 		title := fmt.Sprintf("Episode %s", num)
 		epIdx := 0
 		if n, err := strconv.Atoi(num); err == nil && n > 0 {
@@ -149,7 +411,10 @@ func (s *AllanimeScraper) GetEpisodes(showID string, dub bool) ([]models.Episode
 				if idx := strings.Index(alTitle, " - "); idx >= 0 {
 					alTitle = alTitle[idx+3:]
 				}
-				title = alTitle
+				alTitle = strings.TrimSpace(alTitle)
+				if alTitle != "" {
+					title = alTitle
+				}
 			}
 		}
 
@@ -174,22 +439,57 @@ var anilistCache = struct {
 	data map[string][]string
 }{data: make(map[string][]string)}
 
+var showNameCache = struct {
+	sync.Mutex
+	data map[string]string
+}{data: make(map[string]string)}
+
+var animeDetailCache = struct {
+	sync.Mutex
+	data map[string]*animeDetail
+}{data: make(map[string]*animeDetail)}
+
+var malIDCache = struct {
+	sync.Mutex
+	data map[string]int
+}{data: make(map[string]int)}
+
+func cachedFetchMALID(animeName string) int {
+	malIDCache.Lock()
+	if id, ok := malIDCache.data[animeName]; ok {
+		malIDCache.Unlock()
+		return id
+	}
+	malIDCache.Unlock()
+
+	id := fetchMALID(animeName)
+	if id > 0 {
+		malIDCache.Lock()
+		malIDCache.data[animeName] = id
+		malIDCache.Unlock()
+	}
+	return id
+}
+
 func fetchEpisodeTitlesSync(showID, animeName string) []string {
 	anilistCache.Lock()
-	if cached, ok := anilistCache.data[showID]; ok {
-		anilistCache.Unlock()
-		return cached
-	}
+	cached, ok := anilistCache.data[showID]
 	anilistCache.Unlock()
 
-	titles, err := fetchEpisodeTitles(animeName)
-	if err != nil {
+	if ok && !noValidTitles(cached) {
+		return cached
+	}
+
+	titles := fetchAllEpisodeTitles(animeName)
+	if len(titles) == 0 {
 		return nil
 	}
 
 	anilistCache.Lock()
 	anilistCache.data[showID] = titles
 	anilistCache.Unlock()
+
+	saveEpisodeTitles(showID, titles)
 
 	return titles
 }
@@ -622,4 +922,40 @@ func transType(dub bool) string {
 func sha256Key(s string) []byte {
 	h := sha256.Sum256([]byte(s))
 	return h[:]
+}
+
+func SaveDubPref(dub bool) {
+	if db == nil {
+		return
+	}
+	val := "0"
+	if dub {
+		val = "1"
+	}
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("prefs"))
+		if b == nil {
+			return nil
+		}
+		return b.Put([]byte("dub"), []byte(val))
+	})
+}
+
+func LoadDubPref() bool {
+	if db == nil {
+		return false
+	}
+	var val string
+	db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("prefs"))
+		if b == nil {
+			return nil
+		}
+		v := b.Get([]byte("dub"))
+		if v != nil {
+			val = string(v)
+		}
+		return nil
+	})
+	return val == "1"
 }
