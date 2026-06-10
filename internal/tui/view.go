@@ -178,7 +178,6 @@ func (m Model) viewResults() string {
 		startIdx--
 	}
 
-	// Pre-create styles for metadata and synopsis lines.
 	metaStyle := lipgloss.NewStyle().
 		Foreground(DimColor).
 		PaddingLeft(2)
@@ -202,7 +201,7 @@ func (m Model) viewResults() string {
 		}
 		linesUsed++
 
-		// ---- Metadata line ----
+		// ---- Metadata line (wraps if genres/type/year overflow) ----
 		var metaParts []string
 		animeType := anime.Type
 		if animeType == "" {
@@ -217,29 +216,31 @@ func (m Model) viewResults() string {
 		}
 		if len(metaParts) > 0 {
 			metaLine := strings.Join(metaParts, "  |  ")
+			var rendered string
 			if i == m.cursor {
-				sb.WriteString(metaStyle.Background(selBgColor).Width(m.width - 2).Render(metaLine))
+				rendered = metaStyle.Background(selBgColor).Width(m.width - 2).Render(metaLine)
 			} else {
-				sb.WriteString(metaStyle.Render(metaLine))
+				rendered = metaStyle.Width(m.width - 2).Render(metaLine)
 			}
+			sb.WriteString(rendered)
+			sb.WriteString("\n")
+			linesUsed += strings.Count(rendered, "\n") + 1
+		} else {
+			sb.WriteString("\n")
+			linesUsed++
 		}
-		sb.WriteString("\n")
-		linesUsed++
 
-		// ---- Synopsis line (selected item only) ----
+		// ---- Synopsis line (selected item only, wraps to fit) ----
 		if i == m.cursor {
 			synopsis := anime.Synopsis
 			if synopsis == "" {
 				synopsis = anime.Description
 			}
 			if synopsis != "" {
-				if i == m.cursor {
-					sb.WriteString(synopsisStyle.Background(selBgColor).Width(m.width - 2).Render(truncate(synopsis, m.width-6)))
-				} else {
-					sb.WriteString(synopsisStyle.Render(truncate(synopsis, m.width-6)))
-				}
+				rendered := synopsisStyle.Background(selBgColor).Width(m.width - 2).Render(truncate(synopsis, m.width-6))
+				sb.WriteString(rendered)
 				sb.WriteString("\n")
-				linesUsed++
+				linesUsed += strings.Count(rendered, "\n") + 1
 			}
 		}
 
@@ -338,20 +339,17 @@ func (m Model) viewEpisodes() string {
 		if len(metaParts) > 0 {
 			metaStyle := lipgloss.NewStyle().
 				Foreground(DimColor).
-				PaddingLeft(2)
+				PaddingLeft(2).
+				Width(m.width - 4)
 			metaLine := metaStyle.Render(strings.Join(metaParts, "  |  "))
 			sb.WriteString("\n")
 			sb.WriteString(metaLine)
 		}
 	}
 
-	// Track lines used before episode list (title + metadata)
-	preLines := 2
-
 	// ---- Synopsis section (collapsible with space) ----
 	if anime != nil && anime.Synopsis != "" {
 		sb.WriteString("\n\n")
-		preLines += 2 // blank lines before synopsis
 
 		synopsis := anime.Synopsis
 		synopsisStyle := lipgloss.NewStyle().
@@ -359,35 +357,29 @@ func (m Model) viewEpisodes() string {
 			Faint(true).
 			PaddingLeft(2)
 
-		// Compute wrapped synopsis to get actual line count
 		wrapped := lipgloss.NewStyle().Width(m.width - 4).Render(synopsis)
 		lines := strings.Split(wrapped, "\n")
 		synopsisLines := len(lines)
 
 		if m.showFullSynopsis {
-			// Show full synopsis
 			sb.WriteString(synopsisStyle.Render(wrapped))
-			preLines += synopsisLines
 			sb.WriteString("\n")
 			sb.WriteString(DimStyle.Render("[space to collapse]"))
-			preLines += 1
 		} else {
-			// Show first ~4 lines
 			showLines := min(4, synopsisLines)
 			sb.WriteString(synopsisStyle.Render(strings.Join(lines[:showLines], "\n")))
-			preLines += showLines
 			if synopsisLines > 4 {
 				sb.WriteString("\n")
 				sb.WriteString(DimStyle.Render("[space to expand]"))
-				preLines += 1
 			}
 		}
 	}
 
 	sb.WriteString("\n\n")
-	preLines += 2
 
 	// ---- Episode list ----
+	preContent := sb.String()
+	preLines := strings.Count(preContent, "\n") + 1
 	preliminaryHeight := 3 // separator + blank(PaddingTop) + help
 	availableHeight := max(1, m.height-preLines-preliminaryHeight)
 
@@ -661,7 +653,8 @@ func formatStatus(status string) string {
 	}
 }
 
-// overlayHelp overlays a centered popup box on top of the rendered content.
+// overlayHelp overlays the help popup at the bottom of the rendered content,
+// like opencode's Ctrl+P overlay. The content above stays fully visible.
 func overlayHelp(content, popup string, termWidth int) string {
 	lines := strings.Split(content, "\n")
 	popupLines := strings.Split(popup, "\n")
@@ -675,23 +668,31 @@ func overlayHelp(content, popup string, termWidth int) string {
 		}
 	}
 
-	startY := (len(lines) - popupHeight) / 2
+	// Position at the bottom, leaving a 1-line margin
+	startY := len(lines) - popupHeight - 1
 	if startY < 0 {
 		startY = 0
 	}
+	// Clip out the lines the popup will occupy
+	lines = lines[:startY]
 
 	leftPad := (termWidth - popupWidth) / 2
 	if leftPad < 0 {
 		leftPad = 0
 	}
-	padStr := strings.Repeat(" ", leftPad)
 
-	for i, pl := range popupLines {
-		idx := startY + i
-		if idx >= len(lines) {
-			break
+	// Add margin line
+	lines = append(lines, "")
+
+	// Add each popup line centered horizontally, padded to full width
+	// so the original footer content underneath is completely overwritten.
+	for _, pl := range popupLines {
+		line := strings.Repeat(" ", leftPad) + pl
+		visible := lipgloss.Width(line)
+		if rightPad := termWidth - visible; rightPad > 0 {
+			line += strings.Repeat(" ", rightPad)
 		}
-		lines[idx] = padStr + pl
+		lines = append(lines, line)
 	}
 
 	return strings.Join(lines, "\n")
@@ -778,6 +779,7 @@ func (m Model) renderHelpPopup() string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(AccentColor).
+		Background(lipgloss.AdaptiveColor{Light: "255", Dark: "235"}).
 		Padding(1, 2).
 		Width(min(48, m.width-8)).
 		Render(content)

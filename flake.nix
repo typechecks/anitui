@@ -14,7 +14,7 @@
       {
         packages.default = pkgs.buildGoModule {
           pname = "anitui";
-          version = "0.2.0";
+          version = "0.1.2";
           src = ./.;
           vendorHash = null;
           subPackages = [ "cmd/anitui" ];

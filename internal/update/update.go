@@ -192,41 +192,104 @@ func applyUnix(exeDir string) error {
 }
 
 func applyWindows(exeDir string) error {
-	tmpScript, err := os.CreateTemp("", "anitui-install-*.ps1")
+	rel, err := fetchRelease()
 	if err != nil {
 		return err
 	}
-	tmpPath := tmpScript.Name()
-	defer os.Remove(tmpPath)
 
-	req, err := http.NewRequest("GET", installScriptPS1URL, nil)
+	// Find the zip asset for Windows
+	zipName := "anitui_windows_amd64.zip"
+	if runtime.GOARCH == "arm64" {
+		zipName = "anitui_windows_arm64.zip"
+	}
+	var downloadURL string
+	for _, a := range rel.Assets {
+		if a.Name == zipName {
+			downloadURL = a.BrowserDownloadURL
+			break
+		}
+	}
+	if downloadURL == "" {
+		return fmt.Errorf("no windows asset found in release")
+	}
+
+	// Download zip to a temp folder
+	tmpDir, err := os.MkdirTemp("", "anitui-update-*")
 	if err != nil {
 		return err
 	}
+	zipPath := filepath.Join(tmpDir, "anitui.zip")
+	extractDir := filepath.Join(tmpDir, "anitui_next")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, _ := http.NewRequest("GET", downloadURL, nil)
 	req.Header.Set("User-Agent", "anitui")
-
-	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		os.RemoveAll(tmpDir)
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download install script: status %d", resp.StatusCode)
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("download failed: status %d", resp.StatusCode)
 	}
 
-	if _, err := io.Copy(tmpScript, resp.Body); err != nil {
-		tmpScript.Close()
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		os.RemoveAll(tmpDir)
 		return err
 	}
-	tmpScript.Close()
+	if _, err := io.Copy(zf, resp.Body); err != nil {
+		zf.Close()
+		os.RemoveAll(tmpDir)
+		return err
+	}
+	zf.Close()
 
-	cmd := exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", tmpPath, "-InstallDir", exeDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
+	// Extract zip using PowerShell (Expand-Archive is native)
+	if err := exec.Command("powershell", "-Command",
+		"Expand-Archive", "-Path", zipPath, "-DestinationPath", extractDir, "-Force",
+	).Run(); err != nil {
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("extraction failed: %v", err)
+	}
+
+	newExe := filepath.Join(extractDir, "anitui.exe")
+	if _, err := os.Stat(newExe); err != nil {
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("extracted binary not found: %v", err)
+	}
+
+	// Write launcher PowerShell script that waits, kills, swaps, restarts
+	launcherPath := filepath.Join(tmpDir, "anitui_update.ps1")
+	launcherContent := fmt.Sprintf(`$ErrorActionPreference = "Stop"
+Start-Sleep -Seconds 3
+Get-Process anitui -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Seconds 1
+Copy-Item "%s\anitui.exe" "%s\anitui.exe" -Force
+Remove-Item -Recurse -Force "%s" -ErrorAction SilentlyContinue
+Start-Process "%s\anitui.exe"
+`, extractDir, exeDir, tmpDir, exeDir)
+
+	if err := os.WriteFile(launcherPath, []byte(launcherContent), 0644); err != nil {
+		os.RemoveAll(tmpDir)
+		return err
+	}
+
+	// Start the launcher detached (hidden window)
+	cmd := exec.Command("powershell",
+		"-ExecutionPolicy", "Bypass",
+		"-WindowStyle", "Hidden",
+		"-File", launcherPath,
+	)
+	if err := cmd.Start(); err != nil {
+		os.RemoveAll(tmpDir)
+		return err
+	}
+
+	return nil
 }
 
 func Relaunch() {

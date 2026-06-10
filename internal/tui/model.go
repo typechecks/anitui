@@ -30,7 +30,7 @@ const (
 
 const pageSize = 10
 
-var Version = "0.2.0"
+var Version = "0.2.1"
 
 var debugLog *log.Logger
 
@@ -329,13 +329,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// When help popup is open, only ? and esc close it
+	// Any key closes the help popup and then falls through to normal handling
 	if m.showHelp {
+		m.showHelp = false
 		if msg.String() == "esc" {
-			m.showHelp = false
 			return m, nil
 		}
-		return m, nil
 	}
 
 	if m.screen == ScreenHome {
