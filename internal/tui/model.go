@@ -104,6 +104,8 @@ type Model struct {
 
 	showFullSynopsis bool
 
+	showHelp bool
+
 	spinIndex int
 
 	lastKey string
@@ -228,9 +230,6 @@ func (m Model) applySearchResults(msg searchResultsMsg) (tea.Model, tea.Cmd) {
 	m.cursor = 0
 	m.screen = ScreenResults
 	m.errorMsg = ""
-	if len(m.results) == 0 {
-		m.errorMsg = fmt.Sprintf("No results found for '%s'", m.query)
-	}
 	return m, nil
 }
 
@@ -305,6 +304,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "esc":
+			m.showHelp = false
 			m.pendingMsg = nil
 			m.errorMsg = ""
 			if m.screen == ScreenSearching {
@@ -321,6 +321,21 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenEpisodes
 			return m, nil
 		}
+	}
+
+	// Help popup toggle — work on all screens
+	if msg.String() == "?" {
+		m.showHelp = !m.showHelp
+		return m, nil
+	}
+
+	// When help popup is open, only ? and esc close it
+	if m.showHelp {
+		if msg.String() == "esc" {
+			m.showHelp = false
+			return m, nil
+		}
+		return m, nil
 	}
 
 	if m.screen == ScreenHome {
@@ -469,6 +484,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleEsc() (tea.Model, tea.Cmd) {
+	m.showHelp = false
 	switch m.screen {
 	case ScreenResults:
 		m.screen = ScreenHome
@@ -561,6 +577,7 @@ func (m Model) handleUp() (tea.Model, tea.Cmd) {
 	case ScreenEpisodes:
 		if m.episodeCursor > 0 {
 			m.episodeCursor--
+			m.showFullSynopsis = false
 		}
 	}
 	return m, nil
@@ -575,6 +592,7 @@ func (m Model) handleDown() (tea.Model, tea.Cmd) {
 	case ScreenEpisodes:
 		if m.episodeCursor < len(m.episodes)-1 {
 			m.episodeCursor++
+			m.showFullSynopsis = false
 		}
 	}
 	return m, nil
@@ -589,6 +607,7 @@ func (m Model) handleG() (tea.Model, tea.Cmd) {
 	case ScreenEpisodes:
 		if len(m.episodes) > 0 {
 			m.episodeCursor = 0
+			m.showFullSynopsis = false
 		}
 	}
 	return m, nil
@@ -603,6 +622,7 @@ func (m Model) handleCapitalG() (tea.Model, tea.Cmd) {
 	case ScreenEpisodes:
 		if len(m.episodes) > 0 {
 			m.episodeCursor = len(m.episodes) - 1
+			m.showFullSynopsis = false
 		}
 	}
 	return m, nil
@@ -614,6 +634,7 @@ func (m Model) handleCtrlU() (tea.Model, tea.Cmd) {
 		m.cursor = max(0, m.cursor-pageSize)
 	case ScreenEpisodes:
 		m.episodeCursor = max(0, m.episodeCursor-pageSize)
+		m.showFullSynopsis = false
 	}
 	return m, nil
 }
@@ -627,6 +648,7 @@ func (m Model) handleCtrlD() (tea.Model, tea.Cmd) {
 	case ScreenEpisodes:
 		if len(m.episodes) > 0 {
 			m.episodeCursor = min(len(m.episodes)-1, m.episodeCursor+pageSize)
+			m.showFullSynopsis = false
 		}
 	}
 	return m, nil

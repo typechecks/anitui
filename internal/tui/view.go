@@ -18,22 +18,31 @@ func modKey() string {
 }
 
 func (m Model) View() string {
+	var content string
+
 	switch m.screen {
 	case ScreenHome:
-		return m.viewHome()
+		content = m.viewHome()
 	case ScreenSearching:
-		return m.viewLoading(m.loadingText)
+		content = m.viewLoading(m.loadingText)
 	case ScreenResults:
-		return m.viewResults()
+		content = m.viewResults()
 	case ScreenEpisodes:
-		return m.viewEpisodes()
+		content = m.viewEpisodes()
 	case ScreenLoadingEpisode:
-		return m.viewLoading(m.loadingText)
+		content = m.viewLoading(m.loadingText)
 	case ScreenWatching:
-		return m.viewWatching()
+		content = m.viewWatching()
 	default:
-		return m.viewHome()
+		content = m.viewHome()
 	}
+
+	if m.showHelp {
+		popup := m.renderHelpPopup()
+		content = overlayHelp(content, popup, m.width)
+	}
+
+	return content
 }
 
 func (m Model) viewHome() string {
@@ -48,18 +57,10 @@ func (m Model) viewHome() string {
 	sb.WriteString(searchBox)
 	sb.WriteString("\n\n")
 
-	// Centered search hint
-	hintStyle := lipgloss.NewStyle().
-		Foreground(DimColor).
-		Faint(true)
-	hintText := "Search for an anime..."
-	sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, hintStyle.Render(hintText)))
-	sb.WriteString("\n")
-
 	contentStr := sb.String()
 
 	versionStr := "v" + Version
-	helpText := "enter [search] |  " + modKey() + "+c [quit]"
+	helpText := "[?] for help"
 	helpWidth := len([]rune(helpText))
 	versionWidth := len([]rune(versionStr))
 	gaps := m.width - helpWidth - versionWidth
@@ -124,6 +125,44 @@ func (m Model) viewResults() string {
 	sb.WriteString(header)
 	sb.WriteString("\n\n")
 
+	// Empty results — show inline message instead of redirecting to error view
+	if len(m.results) == 0 {
+		noResultsStyle := lipgloss.NewStyle().
+			Foreground(DimColor).
+			Faint(true)
+		noResultsText := fmt.Sprintf("No results for '%s' — try a different search.", m.query)
+		sb.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, noResultsStyle.Render(noResultsText)))
+
+		contentStr := sb.String()
+		versionStr := "v" + Version
+		help := "[?] for help"
+		helpWidth := len([]rune(help))
+		versionWidth := len([]rune(versionStr))
+		gaps := m.width - helpWidth - versionWidth
+		if gaps < 1 {
+			gaps = 1
+		}
+		helpLine := HelpStyle.Render(help + strings.Repeat(" ", gaps) + versionStr)
+		separatorLine := DimStyle.Render(strings.Repeat("─", m.width))
+
+		if m.height == 0 {
+			return contentStr + separatorLine + "\n" + helpLine
+		}
+
+		footerHeight := 3
+		contentHeight := strings.Count(contentStr, "\n") + 1
+
+		var result strings.Builder
+		result.WriteString(contentStr)
+		if contentHeight+footerHeight < m.height {
+			result.WriteString(strings.Repeat("\n", m.height-contentHeight-footerHeight))
+		}
+		result.WriteString(separatorLine)
+		result.WriteString("\n")
+		result.WriteString(helpLine)
+		return result.String()
+	}
+
 	maxLines := max(1, m.height-8)
 
 	// Scroll backward from cursor to find the starting index.
@@ -155,7 +194,7 @@ func (m Model) viewResults() string {
 
 		// ---- Title line ----
 		if i == m.cursor {
-			sb.WriteString(SelectedListItemStyle.Render("▸ " + anime.Title))
+			sb.WriteString(SelectedListItemStyle.Width(m.width - 2).Render("▸ " + anime.Title))
 			sb.WriteString("\n")
 		} else {
 			sb.WriteString(ListItemStyle.Render(TitleStyle.Render(anime.Title)))
@@ -179,7 +218,7 @@ func (m Model) viewResults() string {
 		if len(metaParts) > 0 {
 			metaLine := strings.Join(metaParts, "  |  ")
 			if i == m.cursor {
-				sb.WriteString(metaStyle.Background(selBgColor).Render(metaLine))
+				sb.WriteString(metaStyle.Background(selBgColor).Width(m.width - 2).Render(metaLine))
 			} else {
 				sb.WriteString(metaStyle.Render(metaLine))
 			}
@@ -195,7 +234,7 @@ func (m Model) viewResults() string {
 			}
 			if synopsis != "" {
 				if i == m.cursor {
-					sb.WriteString(synopsisStyle.Background(selBgColor).Render(truncate(synopsis, m.width-6)))
+					sb.WriteString(synopsisStyle.Background(selBgColor).Width(m.width - 2).Render(truncate(synopsis, m.width-6)))
 				} else {
 					sb.WriteString(synopsisStyle.Render(truncate(synopsis, m.width-6)))
 				}
@@ -212,8 +251,7 @@ func (m Model) viewResults() string {
 	contentStr := sb.String()
 
 	versionStr := "v" + Version
-	help := fmt.Sprintf("%d results  |  ↑↓/jk [navigate]  |  gg/G [page up/down]  |  enter [select]  |  esc [back]  |  / [search]",
-		len(m.results))
+	help := "[?] for help"
 	helpWidth := len([]rune(help))
 	versionWidth := len([]rune(versionStr))
 	gaps := m.width - helpWidth - versionWidth
@@ -307,48 +345,51 @@ func (m Model) viewEpisodes() string {
 		}
 	}
 
+	// Track lines used before episode list (title + metadata)
+	preLines := 2
+
 	// ---- Synopsis section (collapsible with space) ----
 	if anime != nil && anime.Synopsis != "" {
 		sb.WriteString("\n\n")
+		preLines += 2 // blank lines before synopsis
+
 		synopsis := anime.Synopsis
 		synopsisStyle := lipgloss.NewStyle().
 			Foreground(DimColor).
 			Faint(true).
 			PaddingLeft(2)
+
+		// Compute wrapped synopsis to get actual line count
+		wrapped := lipgloss.NewStyle().Width(m.width - 4).Render(synopsis)
+		lines := strings.Split(wrapped, "\n")
+		synopsisLines := len(lines)
+
 		if m.showFullSynopsis {
 			// Show full synopsis
-			wrapped := lipgloss.NewStyle().Width(m.width - 4).Render(synopsis)
 			sb.WriteString(synopsisStyle.Render(wrapped))
+			preLines += synopsisLines
 			sb.WriteString("\n")
 			sb.WriteString(DimStyle.Render("[space to collapse]"))
+			preLines += 1
 		} else {
 			// Show first ~4 lines
-			wrapped := lipgloss.NewStyle().Width(m.width - 4).Render(synopsis)
-			lines := strings.Split(wrapped, "\n")
-			showLines := min(4, len(lines))
+			showLines := min(4, synopsisLines)
 			sb.WriteString(synopsisStyle.Render(strings.Join(lines[:showLines], "\n")))
-			if len(lines) > 4 {
+			preLines += showLines
+			if synopsisLines > 4 {
 				sb.WriteString("\n")
 				sb.WriteString(DimStyle.Render("[space to expand]"))
+				preLines += 1
 			}
 		}
 	}
 
 	sb.WriteString("\n\n")
+	preLines += 2
 
 	// ---- Episode list ----
-	availableHeight := max(1, m.height-10)
-	if anime != nil && anime.Synopsis != "" {
-		if m.showFullSynopsis {
-			// More lines used for full synopsis — fewer available for episode list
-			availableHeight = max(1, m.height-14)
-		} else {
-			availableHeight = max(1, m.height-12)
-		}
-	}
-	if availableHeight < 1 {
-		availableHeight = 1
-	}
+	preliminaryHeight := 3 // separator + blank(PaddingTop) + help
+	availableHeight := max(1, m.height-preLines-preliminaryHeight)
 
 	startIdx := 0
 	if m.episodeCursor >= availableHeight {
@@ -380,8 +421,7 @@ func (m Model) viewEpisodes() string {
 
 	// ---- Help bar ----
 	versionStr := "v" + Version
-	help := fmt.Sprintf("%d/%d episodes  |  ↑↓/jk [nav]  |  enter [play]  |  esc [back]",
-		m.episodeCursor+1, len(m.episodes))
+	help := "[?] for help"
 	helpWidth := len([]rune(help))
 	versionWidth := len([]rune(versionStr))
 	gaps := m.width - helpWidth - versionWidth
@@ -502,7 +542,7 @@ func (m Model) viewWatching() string {
 	contentStr := sb.String()
 
 	versionStr := "v" + Version
-	helpText := "⇆/hl [prev/next]  |  space [replay]  |  s [source]  |  d [sub/dub]  |  esc [back]"
+	helpText := "[?] for help"
 	helpWidth := len([]rune(helpText))
 	versionWidth := len([]rune(versionStr))
 	gaps := m.width - helpWidth - versionWidth
@@ -560,7 +600,7 @@ func (m Model) viewError(errMsg string) string {
 	contentStr := sb.String()
 
 	versionStr := "v" + Version
-	help := "esc [back]  |  / [search]  |  " + modKey() + "+c [quit]"
+	help := "[?] for help"
 	helpWidth := len([]rune(help))
 	versionWidth := len([]rune(versionStr))
 	gaps := m.width - helpWidth - versionWidth
@@ -619,4 +659,128 @@ func formatStatus(status string) string {
 	default:
 		return status
 	}
+}
+
+// overlayHelp overlays a centered popup box on top of the rendered content.
+func overlayHelp(content, popup string, termWidth int) string {
+	lines := strings.Split(content, "\n")
+	popupLines := strings.Split(popup, "\n")
+	popupHeight := len(popupLines)
+
+	popupWidth := 0
+	for _, pl := range popupLines {
+		w := lipgloss.Width(pl)
+		if w > popupWidth {
+			popupWidth = w
+		}
+	}
+
+	startY := (len(lines) - popupHeight) / 2
+	if startY < 0 {
+		startY = 0
+	}
+
+	leftPad := (termWidth - popupWidth) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+	padStr := strings.Repeat(" ", leftPad)
+
+	for i, pl := range popupLines {
+		idx := startY + i
+		if idx >= len(lines) {
+			break
+		}
+		lines[idx] = padStr + pl
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderHelpPopup() string {
+	var bindings []string
+
+	switch m.screen {
+	case ScreenHome:
+		bindings = []string{
+			"  Home",
+			"    enter  [search]",
+			"    /      [focus search]",
+			"",
+			"  General",
+			"    ?      [toggle help]",
+			"    " + modKey() + "+c  [quit]",
+		}
+	case ScreenResults:
+		bindings = []string{
+			"  Results",
+			"    ↑/k    [move up]",
+			"    ↓/j    [move down]",
+			"    gg     [top]",
+			"    G      [bottom]",
+			"    ctrl+u [page up]",
+			"    ctrl+d [page down]",
+			"",
+			"  Actions",
+			"    enter  [select anime]",
+			"    /      [new search]",
+			"    esc    [back]",
+			"",
+			"  General",
+			"    ?      [toggle help]",
+			"    " + modKey() + "+c  [quit]",
+		}
+	case ScreenEpisodes:
+		bindings = []string{
+			"  Episodes",
+			"    ↑/k    [move up]",
+			"    ↓/j    [move down]",
+			"",
+			"  Actions",
+			"    enter  [play episode]",
+			"    space  [toggle synopsis]",
+			"    d      [dub/sub]",
+			"    esc    [back]",
+			"",
+			"  General",
+			"    ?      [toggle help]",
+			"    " + modKey() + "+c  [quit]",
+		}
+	case ScreenWatching:
+		bindings = []string{
+			"  Player",
+			"    ←/h    [prev episode]",
+			"    →/l    [next episode]",
+			"    space  [replay]",
+			"    r      [replay]",
+			"",
+			"  Options",
+			"    s      [cycle source]",
+			"    d      [dub/sub]",
+			"    esc    [back]",
+			"",
+			"  General",
+			"    ?      [toggle help]",
+			"    " + modKey() + "+c  [quit]",
+		}
+	case ScreenSearching, ScreenLoadingEpisode:
+		bindings = []string{
+			"  Loading",
+			"    esc    [cancel]",
+			"",
+			"  General",
+			"    " + modKey() + "+c  [quit]",
+		}
+	}
+
+	content := strings.Join(bindings, "\n")
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(AccentColor).
+		Padding(1, 2).
+		Width(min(48, m.width-8)).
+		Render(content)
+
+	return box
 }

@@ -181,12 +181,8 @@ func TestWatchingView_HelpBarMentionedKeys(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	output := m.View()
-	assertContains(t, output, "⇆/hl")
-	assertContains(t, output, "[prev/next]")
-	assertContains(t, output, "space [replay]")
-	assertContains(t, output, "s [source]")
-	assertContains(t, output, "d [sub/dub]")
-	assertContains(t, output, "esc [back]")
+	assertContains(t, output, "[?]")
+	assertContains(t, output, "v"+Version)
 }
 
 func TestWatchingView_EmptyEpisodes_NoCrash(t *testing.T) {
@@ -255,7 +251,7 @@ func TestWatchingView_ErrorAboveControls(t *testing.T) {
 	m.errorMsg = "Network error occurred"
 	output := m.View()
 	assertContains(t, output, "Network error occurred")
-	assertContains(t, output, "esc [back]")
+	assertContains(t, output, "[?]")
 }
 
 func TestWatchingView_WidthSet_PanicsNot(t *testing.T) {
